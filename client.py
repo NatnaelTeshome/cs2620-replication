@@ -1,123 +1,162 @@
+from abc import ABC, abstractmethod
 import socket
 import threading
 import json
 import struct
-import hashlib
+from queue import Queue
+from typing import Optional
 
-def send_msg(s, data):
-    """
-    send data over a socket using a 4-byte length prefix.
-    """
-    msg = struct.pack("!I", len(data)) + data
-    s.sendall(msg)
 
-def recvall(s, n):
-    """
-    receive exactly n bytes from the socket.
-    """
-    data = b""
-    while len(data) < n:
-        packet = s.recv(n - len(data))
-        if not packet:
-            return None
-        data += packet
-    return data
+class AbstractClient(ABC):
+    """Abstract base class defining the client interface"""
+    
+    @abstractmethod
+    def send_request(self, request: dict) -> None:
+        """Send a request to the server"""
+        pass
 
-def recv_msg(s):
-    """
-    receive a message from the socket framed with a 4-byte header.
-    """
-    raw_len = recvall(s, 4)
-    if not raw_len:
-        return None
-    msg_len = struct.unpack("!I", raw_len)[0]
-    return recvall(s, msg_len)
+    @abstractmethod
+    def close(self) -> None:
+        """Close the connection"""
+        pass
 
-def receive_thread(s):
-    """
-    background thread to process incoming server messages.
-    """
-    while True:
-        data = recv_msg(s)
-        if not data:
-            print("disconnected from server")
-            break
+
+class Client(AbstractClient):
+    """Real client implementation that talks to the server"""
+
+    def __init__(self, host: str, port: int, incoming_queue: Queue):
+        self.host = host
+        self.port = port
+        self.incoming_queue = incoming_queue
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.lock = threading.Lock()
         try:
-            message = json.loads(data.decode("utf-8"))
-        except:
-            continue
-        # handle asynchronous incoming messages
-        if "command" in message and message["command"] == "incoming_message":
-            sender = message["data"].get("sender")
-            text = message["data"].get("message")
-            print(f"\nincoming message from {sender}: {text}\n> ", end="")
-        else:
-            print(f"\nserver response: {message}\n> ", end="")
+            self.sock.connect((self.host, self.port))
+        except Exception as e:
+            raise Exception(f"Cannot connect to server: {e}")
+        self.running = True
+        self.receiver_thread = threading.Thread(
+            target=self._receive_loop, daemon=True
+        )
+        self.receiver_thread.start()
 
-def hash_password(pwd):
-    """
-    hash password using sha256.
-    """
-    return hashlib.sha256(pwd.encode("utf-8")).hexdigest()
+    def _send_msg(self, data: bytes) -> None:
+        """Internal method to send raw bytes with length prefix"""
+        try:
+            msg = struct.pack("!I", len(data)) + data
+            with self.lock:
+                self.sock.sendall(msg)
+        except Exception as e:
+            print(f"Error sending message: {e}")
+            self.incoming_queue.put({"type": "connection_error", "error": str(e)})
 
-def main():
-    host = "localhost"
-    port = 9999
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.connect((host, port))
-    print("connected to server")
-    username = None
-    # start a background thread to listen for incoming messages
-    thread = threading.Thread(target=receive_thread, args=(s,), daemon=True)
-    thread.start()
-    while True:
-        cmd = input("> ").strip()
-        if cmd == "exit":
-            break
-        elif cmd == "create":
-            username = input("username: ").strip()
-            pwd = input("password: ").strip()
-            pwd_hash = hash_password(pwd)
-            request = {"command": "create_account",
-                       "data": {"username": username,
-                                "password_hash": pwd_hash}}
-            send_msg(s, json.dumps(request).encode("utf-8"))
-        elif cmd == "login":
-            username = input("username: ").strip()
-            pwd = input("password: ").strip()
-            pwd_hash = hash_password(pwd)
-            request = {"command": "login",
-                       "data": {"username": username,
-                                "password_hash": pwd_hash}}
-            send_msg(s, json.dumps(request).encode("utf-8"))
-        elif cmd == "send":
-            if not username:
-                print("you must login first")
-                continue
-            recipient = input("recipient: ").strip()
-            text = input("message: ").strip()
-            request = {"command": "send_message",
-                       "data": {"sender": username,
-                                "recipient": recipient,
-                                "message": text}}
-            send_msg(s, json.dumps(request).encode("utf-8"))
-        elif cmd == "read":
-            if not username:
-                print("you must login first")
-                continue
-            count_input = input("number of messages (0 for all): ").strip()
+    def send_request(self, request: dict) -> None:
+        """Send a JSON request to the server"""
+        try:
+            data = json.dumps(request).encode("utf-8")
+            self._send_msg(data)
+        except Exception as e:
+            print(f"Error sending request: {e}")
+            self.incoming_queue.put({"type": "connection_error", "error": str(e)})
+
+    def _recvall(self, n: int) -> Optional[bytes]:
+        """Internal method to receive exactly n bytes"""
+        data = b""
+        while len(data) < n:
+            packet = self.sock.recv(n - len(data))
+            if not packet:
+                return None
+            data += packet
+        return data
+
+    def _recv_msg(self) -> Optional[bytes]:
+        """Internal method to receive a length-prefixed message"""
+        raw_len = self._recvall(4)
+        if not raw_len:
+            return None
+        msg_len = struct.unpack("!I", raw_len)[0]
+        return self._recvall(msg_len)
+
+    def _receive_loop(self) -> None:
+        """Background thread for receiving messages"""
+        while self.running:
             try:
-                count = int(count_input)
-            except:
-                count = 0
-            request = {"command": "read_messages",
-                       "data": {"username": username,
-                                "count": count}}
-            send_msg(s, json.dumps(request).encode("utf-8"))
-        else:
-            print("unknown command, use: create, login, send, read, exit")
-    s.close()
+                data = self._recv_msg()
+                if not data:
+                    self.running = False
+                    self.incoming_queue.put({"type": "connection_closed"})
+                    break
+                response = json.loads(data.decode("utf-8"))
+                self.incoming_queue.put(response)
+            except Exception as e:
+                if self.running:
+                    print(f"Error receiving message: {e}")
+                    self.incoming_queue.put(
+                        {"type": "connection_error", "error": str(e)}
+                    )
+                break
 
-if __name__ == "__main__":
-    main()
+    def close(self) -> None:
+        """Close the connection gracefully"""
+        self.running = False
+        try:
+            self.sock.shutdown(socket.SHUT_RDWR)
+        except Exception:
+            pass
+        self.sock.close()
 
+
+class DummyClient(AbstractClient):
+    """Mock client for testing/development"""
+
+    def __init__(self, incoming_queue: Queue):
+        self.incoming_queue = incoming_queue
+        self.users = {"test": "test"}  # Dummy user database
+        self.messages = {}  # Dummy message storage
+
+    def send_request(self, request: dict) -> None:
+        """
+        Handle requests without actual networking.
+        Simulates server responses by putting appropriate messages in the queue.
+        """
+        command = request.get("command")
+        data = request.get("data", {})
+
+        if command == "login":
+            username = data.get("username")
+            self.incoming_queue.put({
+                "status": "success",
+                "message": f"Login successful. You have 0 unread messages."
+            })
+
+        elif command == "create_account":
+            username = data.get("username")
+            self.users[username] = data.get("password_hash")
+            self.incoming_queue.put({
+                "status": "success",
+                "message": "Account created successfully"
+            })
+
+        elif command == "send_message":
+            recipient = data.get("recipient")
+            message = data.get("message")
+            if recipient not in self.messages:
+                self.messages[recipient] = []
+            self.messages[recipient].append(message)
+            self.incoming_queue.put({
+                "status": "success",
+                "message": "Message sent successfully"
+            })
+
+        elif command == "validate_user":
+            username = data.get("username")
+            self.incoming_queue.put({
+                "status": "success",
+                "command": "validate_user",
+                "username": username,
+                "exists": True
+            })
+
+    def close(self) -> None:
+        """Nothing to close in dummy client"""
+        pass

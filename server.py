@@ -122,6 +122,15 @@ def handle_client(conn, addr):
                         accounts[username]["messages"] = msgs[count:]
                         response = {"status": "success", "messages": msgs_to_send}
                 send_msg(conn, json.dumps(response).encode("utf-8"))
+            elif command == "validate_user":
+                username = content.get("username")
+                with lock:
+                    if username not in accounts:
+                        response = {"status": "error",
+                                    "error": "account does not exist"}
+                    else:
+                        response = {"status": "success", "username": username}
+                send_msg(conn, json.dumps(response).encode("utf-8"))
             else:
                 response = {"status": "error", "error": "unknown command"}
                 send_msg(conn, json.dumps(response).encode("utf-8"))

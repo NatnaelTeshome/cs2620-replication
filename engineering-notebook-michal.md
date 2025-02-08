@@ -24,3 +24,15 @@ in plaintext and be failed by Prof. Waldo)
 
 Questions for OH:
 - do we have to use a Selector the way Prof. Waldo used it in the slides?
+
+
+
+Date: Feb 8th 15:34
+
+Started prototyping GUI with TKinter. It was a natural choice given it comes bundled
+with the python package, is simple, and I've worked with it before! Also,
+abstracted away the client class so that I can use a dummy client that always succeeds.
+
+
+TODOs:
+- need to remember to remove the hardcoded localhost and port number
