@@ -516,6 +516,15 @@ class chatapp(tk.Tk):
         # message input area at the bottom
         input_frame = tk.Frame(frame)
         input_frame.pack(fill="x", padx=5, pady=5)
+
+        # create a label to display the currently selected username
+        # initially empty; store it in an instance variable
+        to_label = tk.Label(input_frame, text="To:", fg="gray40")
+        to_label.pack(side="left", padx=(5, 2))
+
+        self.selected_user_label = tk.Label(input_frame, text="No receiver selected", fg="red")
+        self.selected_user_label.pack(side="left", padx=(0, 5))
+
         self.message_entry = tk.Entry(input_frame)
         self.message_entry.pack(side="left", expand=True, fill="x", padx=5)
         self.message_entry.bind("<Return>", self.send_message)
@@ -570,6 +579,8 @@ class chatapp(tk.Tk):
         if selection:
             self.selected_account = self.accounts_listbox.get(selection[0])
             logging.debug("selected conversation with account: %s", self.selected_account)
+            color = self.get_user_color(self.selected_account)
+            self.selected_user_label.config(text=self.selected_account, fg=color)
             self.update_messages_area()
         self.message_offset = 0
 
