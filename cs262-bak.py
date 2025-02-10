@@ -5,19 +5,6 @@ from datetime import datetime
 import logging
 import argparse
 
-USER_COLORS = [
-    "#1f77b4",  # a cool blue
-    "#ff7f0e",  # a warm orange
-    "#2ca02c",  # a fresh green
-    "#d62728",  # a bold red
-    "#9467bd",  # a muted purple
-    "#8c564b",  # a natural brown
-    "#e377c2",  # a soft pink
-    "#7f7f7f",  # balanced gray
-    "#bcbd22",  # earthy olive
-    "#17becf",  # crisp cyan
-]
-
 # dummy client for illustration purposes
 class client:
     def __init__(self, host: str, port: int) -> None:
@@ -26,87 +13,21 @@ class client:
         self.session_token = None
         self.username: Optional[str] = None
         # dummy storage for testing
-        self.accounts = {
-            "alice": "password",
-            "bob": "abc",
-            "natnael": "teshome",
-            "michal": "kurek",
-        }
+        self.accounts = {"alice": "password", "bob": "abc", "natnael": "teshome", "michal": "kurek"}
         self.messages = [
-            {
-                "id": 1,
-                "from": "alice",
-                "to": "michal",
-                "timestamp": 1739064990,
-                "content": "hey",
-            },
-            {
-                "id": 2,
-                "from": "bob",
-                "to": "michal",
-                "timestamp": 1739065050,
-                "content": "hello",
-            },
-            {
-                "id": 3,
-                "from": "alice",
-                "to": "michal",
-                "timestamp": 1739065110,
-                "content": "how r u?",
-            },
-            {
-                "id": 4,
-                "from": "michal",
-                "to": "alice",
-                "timestamp": 1739065170,
-                "content": "i'm good, u?",
-            },
-            {
-                "id": 5,
-                "from": "alice",
-                "to": "michal",
-                "timestamp": 1739065230,
-                "content": "doing alright",
-            },
-            {
-                "id": 6,
-                "from": "bob",
-                "to": "alice",
-                "timestamp": 1739065290,
-                "content": "nice to hear",
-            },
-            {
-                "id": 7,
-                "from": "michal",
-                "to": "bob",
-                "timestamp": 1739065350,
-                "content": "what's up?",
-            },
-            {
-                "id": 8,
-                "from": "bob",
-                "to": "michal",
-                "timestamp": 1739065410,
-                "content": "not much, just chilling",
-            },
-            {
-                "id": 9,
-                "from": "alice",
-                "to": "bob",
-                "timestamp": 1739065470,
-                "content": "same here",
-            },
-            {
-                "id": 10,
-                "from": "michal",
-                "to": "alice",
-                "timestamp": 1739065530,
-                "content": "wanna hang out later?",
-            },
+            {"id": 1, "from": "alice", "to": "michal", "timestamp": 1739064990, "content": "hey"},
+            {"id": 2, "from": "bob", "to": "michal", "timestamp": 1739065050, "content": "hello"},
+            {"id": 3, "from": "alice", "to": "michal", "timestamp": 1739065110, "content": "how r u?"},
+            {"id": 4, "from": "michal", "to": "alice", "timestamp": 1739065170, "content": "i'm good, u?"},
+            {"id": 5, "from": "alice", "to": "michal", "timestamp": 1739065230, "content": "doing alright"},
+            {"id": 6, "from": "bob", "to": "alice", "timestamp": 1739065290, "content": "nice to hear"},
+            {"id": 7, "from": "michal", "to": "bob", "timestamp": 1739065350, "content": "what's up?"},
+            {"id": 8, "from": "bob", "to": "michal", "timestamp": 1739065410, "content": "not much, just chilling"},
+            {"id": 9, "from": "alice", "to": "bob", "timestamp": 1739065470, "content": "same here"},
+            {"id": 10, "from": "michal", "to": "alice", "timestamp": 1739065530, "content": "wanna hang out later?"}
         ]
-        logging.debug(
-            "client initialized with host '%s' and port '%s'", host, port
-        )
+        logging.debug("client initialized with host '%s' and port '%s'",
+                      host, port)
 
     def account_exists(self, username: str) -> bool:
         exists = username in self.accounts
@@ -144,33 +65,24 @@ class client:
         accounts = list(self.accounts.keys())
         if pattern != "*" and pattern:
             accounts = [acct for acct in accounts if pattern in acct]
-        result = accounts[offset : offset + limit]
-        logging.debug(
-            "list_accounts with pattern '%s', offset %d, limit %d: %s",
-            pattern,
-            offset,
-            limit,
-            result,
-        )
+        result = accounts[offset: offset + limit]
+        logging.debug("list_accounts with pattern '%s', offset %d, limit %d: %s",
+                      pattern, offset, limit, result)
         return result
 
-    def read_messages(
-        self, offset: int = 0, count: int = 10, to_user: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+    def read_messages(self, offset: int = 0, count: int = 10, to_user: Optional[str] = None) -> List[Dict[str, Any]]:
         if to_user:
             result = [
-                msg
-                for msg in self.messages
-                if (msg["to"] == self.username and msg["from"] == to_user)
-                or (msg["from"] == self.username and msg["to"] == to_user)
+                msg for msg in self.messages
+                if (msg["to"] == self.username and msg["from"] == to_user) or
+                (msg["from"] == self.username and msg["to"] == to_user)
             ]
         else:
             result = [
-                msg
-                for msg in self.messages
+                msg for msg in self.messages
                 if msg["to"] == self.username or msg["from"] == self.username
             ]
-        result = result[offset : offset + count]
+        result = result[offset: offset + count]
         logging.debug("read_messages with offset %d, count %d: %s", offset, count, result)
         return result
 
@@ -188,75 +100,11 @@ class client:
         self.messages.append(new_msg)
         logging.info("sent message to '%s': %s: %s", recipient, message, self.messages)
 
-    def delete_message(self, message_id: int) -> None:
-        # simple deletion based on message id
-        for msg in self.messages:
-            if msg["id"] == message_id:
-                self.messages.remove(msg)
-                logging.info("deleted message with id %d", message_id)
-                return
-        logging.error("message with id %d not found", message_id)
-        raise Exception("message not found")
-
-
-# custom message line widget: shows a message and, on hover, an inline "delete" link
-class message_line(tk.Frame):
-    def __init__(self, parent, msg_data: Dict[str, Any], delete_callback,
-                 user_color: str = "gray40", *args, **kwargs):
-        super().__init__(parent, *args, **kwargs)
-        self.msg_data = msg_data
-        self.delete_callback = delete_callback
-
-        # format the message text
-        timestamp = datetime.fromtimestamp(msg_data.get("timestamp", 0)).strftime("%Y-%m-%d %H:%M:%S")
-        sender = msg_data.get("from", "unknown")
-        content = msg_data.get("content", "")
-        message_text = f"[{timestamp}] {sender}: {content}"
-
-        # create a label for the message text (left side)
-        self.text_label = tk.Label(self, text=message_text, anchor="w", fg=user_color)
-        self.text_label.grid(row=0, column=0, sticky="w")
-
-        # create a label for "delete" (right side); initially hidden
-        self.delete_label = tk.Label(self, text="delete", fg="red", cursor="hand2")
-        self.delete_label.grid(row=0, column=1, sticky="e", padx=(10, 0))
-        self.delete_label.grid_remove()
-
-        # bind events so that hovering over any part of this message_line shows the delete link
-        self.bind("<Enter>", self.on_enter)
-        self.bind("<Leave>", self.on_leave)
-        self.text_label.bind("<Enter>", self.on_enter)
-        self.text_label.bind("<Leave>", self.on_leave)
-        self.delete_label.bind("<Enter>", self.on_enter)
-        self.delete_label.bind("<Leave>", self.on_leave)
-        # when the delete label is clicked, call the delete callback (passing the message id)
-        self.delete_label.bind("<Button-1>", lambda e: self.on_delete())
-
-        self.hide_job = None
-
-    def on_enter(self, event=None):
-        if self.hide_job is not None:
-            self.after_cancel(self.hide_job)
-            self.hide_job = None
-        self.delete_label.grid()  # show the delete link
-
-    def on_leave(self, event=None):
-        # schedule hiding after a short delay to allow for moving between the text and the link
-        self.hide_job = self.after(50, self.hide_delete)
-
-    def hide_delete(self):
-        self.delete_label.grid_remove()
-        self.hide_job = None
-
-    def on_delete(self):
-        # invoke the delete callback with the current message id
-        self.delete_callback(self.msg_data["id"])
-
 
 class chatapp(tk.Tk):
     def __init__(self, host: str, port: int) -> None:
         super().__init__()
-        self.title("(c)hatsystem2620")
+        self.title("(C)hat(S)ystem2620")
         self.geometry("800x600")
         self.client: client = client(host, port)
         self.current_user: Optional[str] = None
@@ -272,9 +120,6 @@ class chatapp(tk.Tk):
         self.login_frame: Optional[tk.Frame] = None
         self.signup_frame: Optional[tk.Frame] = None
         self.chat_frame: Optional[tk.Frame] = None
-
-        # defines unique colors for different users
-        self.user_color_map = {}
 
         logging.debug("application initialized")
         self._create_login_frame()
@@ -292,8 +137,8 @@ class chatapp(tk.Tk):
         user_lbl.pack()
         self.login_username_entry = tk.Entry(frame)
         self.login_username_entry.bind(
-            "<Control-a>",
-            lambda x: self.login_username_entry.selection_range(0, "end") or "break",
+            '<Control-a>',
+            lambda x: self.login_username_entry.selection_range(0, 'end') or "break"
         )
         self.login_username_entry.pack(pady=5)
 
@@ -301,10 +146,10 @@ class chatapp(tk.Tk):
         pass_lbl.pack()
         self.login_password_entry = tk.Entry(frame, show="*")
         self.login_password_entry.bind(
-            "<Control-a>",
-            lambda x: self.login_password_entry.selection_range(0, "end") or "break",
+            '<Control-a>',
+            lambda x: self.login_password_entry.selection_range(0, 'end') or "break"
         )
-        self.login_password_entry.bind("<Return>", lambda _x: self.login())
+        self.login_password_entry.bind('<Return>', lambda _x: self.login())
         self.login_password_entry.pack(pady=5)
 
         login_btn = tk.Button(frame, text="login", command=self.login)
@@ -332,12 +177,11 @@ class chatapp(tk.Tk):
         self._create_chat_frame()
 
     # ---------- signup screen -----------
-    def _create_signup_frame(self) -> None:
+    def _create_signup_frame_backup(self) -> None:
+        # TODO: Remove this legacy code
         logging.debug("creating signup frame")
         frame = tk.Frame(self)
         frame.pack(expand=True, fill="both")
-
-        self.password_container = tk.Frame(frame)
 
         title_lbl = tk.Label(frame, text="create account", font=("arial", 24))
         title_lbl.pack(pady=20)
@@ -347,34 +191,88 @@ class chatapp(tk.Tk):
         self.signup_username_entry = tk.Entry(frame)
         self.signup_username_entry.pack(pady=5)
         self.signup_username_entry.bind(
-            "<Control-a>",
-            lambda x: self.signup_username_entry.selection_range(0, "end") or "break",
+            '<Control-a>',
+            lambda x: self.signup_username_entry.selection_range(0, 'end') or "break"
         )
 
-        check_btn = tk.Button(frame, text="continue", command=self.check_username_availability)
+        check_btn = tk.Button(frame, text="Continue", command=self.check_username_availability)
         check_btn.pack(pady=5)
 
-        self.status_label = tk.Label(frame, text="")
+        # How do I make these labels appear only after self.check_username_availability succeeds
+        # by setting self.signup_available = True?
+
+        pass_lbl = tk.Label(frame, text="password:")
+        pass_lbl.pack()
+        self.signup_password_entry = tk.Entry(frame, show="*")
+        self.signup_password_entry.pack(pady=5)
+        self.signup_password_entry.bind(
+            '<Control-a>',
+            lambda x: self.signup_password_entry.selection_range(0, 'end') or "break"
+        )
+
+        signup_btn = tk.Button(frame, text="sign up", command=self.signup)
+        signup_btn.pack(pady=20)
+
+        # switch_btn = tk.Button(frame, text="already have an account? login", command=self._switch_to_login)
+        # switch_btn.pack(side="bottom", pady=10)
+
+        self.signup_frame = frame
+        logging.debug("signup frame created")
+
+    def _create_signup_frame(self) -> None:
+        logging.debug("creating signup frame")
+        frame = tk.Frame(self)
+        frame.pack(expand=True, fill="both")
+
+        # Container for password fields (initially hidden)
+        self.password_container = tk.Frame(frame)
+        
+        title_lbl = tk.Label(frame, text="create account", font=("arial", 24))
+        title_lbl.pack(pady=20)
+
+        # Username Section
+        user_lbl = tk.Label(frame, text="username:")
+        user_lbl.pack()
+        self.signup_username_entry = tk.Entry(frame)
+        self.signup_username_entry.pack(pady=5)
+        self.signup_username_entry.bind(
+            '<Control-a>',
+            lambda x: self.signup_username_entry.selection_range(0, 'end') or "break"
+        )
+
+        check_btn = tk.Button(frame, text="Continue", command=self.check_username_availability)
+        check_btn.pack(pady=5)
+
+        # Password Section (initially hidden)
+        self.status_label = tk.Label(frame, text="")  # For showing messages
         self.pass_lbl = tk.Label(self.password_container, text="password:")
         self.signup_password_entry = tk.Entry(self.password_container, show="*")
         self.signup_password_entry.bind(
-            "<Control-a>",
-            lambda x: self.signup_password_entry.selection_range(0, "end") or "break",
+            '<Control-a>',
+            lambda x: self.signup_password_entry.selection_range(0, 'end') or "break"
         )
         self.signup_btn = tk.Button(self.password_container, text="sign up", command=self.signup)
+
+        # Navigation
+        # switch_btn = tk.Button(frame, text="already have an account? login", command=self._switch_to_login)
+        # switch_btn.pack(pady=10)
 
         self.signup_frame = frame
         logging.debug("signup frame created")
 
     def show_password_fields(self):
-        self.status_label.config(text="username available! choose a password")
+        """Show password fields after successful username check"""
+        self.status_label.config(text="Username available! Choose a password")
         self.status_label.pack(pady=5)
+        
+        # Pack password container and its children
         self.password_container.pack()
         self.pass_lbl.pack()
         self.signup_password_entry.pack(pady=5)
         self.signup_btn.pack(pady=20)
 
     def hide_password_fields(self):
+        """Does the opposite of show_password_fields"""
         self.password_container.pack_forget()
 
     def check_username_availability(self) -> None:
@@ -391,26 +289,20 @@ class chatapp(tk.Tk):
             return
         if available:
             logging.info("username '%s' is available", username)
-            self.status_label.config(
-                text="username available. enter a password to create your account.",
-                fg="green",
-            )
+            self.status_label.config(text="Username available. Enter a password to create your account.", fg="green")
             self.signup_available = True
             self.show_password_fields()
             if hasattr(self, "login_link"):
-                self.login_link.pack_forget()
+                self.login_link.pack_forget()  # remove login link if it was added before
         else:
             logging.warning("username '%s' is already taken", username)
             self.signup_available = False
-            self.status_label.config(
-                text="username is already taken. pick a different username or",
-                fg="red",
-            )
+            self.status_label.config(text="Username is already taken. Pick a different username or", fg="red")
             self.status_label.pack(pady=5)
+
+            # create a clickable "log in" link
             if not hasattr(self, "login_link"):
-                self.login_link = tk.Label(
-                    self.signup_frame, text="log in", fg="cyan", cursor="hand2"
-                )
+                self.login_link = tk.Label(self.signup_frame, text="log in", fg="cyan", cursor="hand2")
                 self.login_link.bind("<Button-1>", lambda e: self._switch_to_login())
                 self.login_link.pack(pady=5)
             self.hide_password_fields()
@@ -453,12 +345,15 @@ class chatapp(tk.Tk):
         frame.pack(expand=True, fill="both")
         self.chat_frame = frame
 
+        # settings button (top right)
         settings_btn = tk.Button(frame, text="settings", command=self.open_settings)
         settings_btn.pack(anchor="ne", padx=5, pady=5)
 
+        # paned window dividing the accounts column and the messages area
         paned = tk.PanedWindow(frame, orient=tk.HORIZONTAL)
         paned.pack(expand=True, fill="both")
 
+        # left column: accounts column with search functionality
         accounts_frame = tk.Frame(paned, width=200)
         paned.add(accounts_frame)
 
@@ -468,14 +363,15 @@ class chatapp(tk.Tk):
         self.account_search_entry.pack(fill="x", padx=5, pady=(0, 5))
         self.account_search_entry.bind("<Return>", self.on_account_search)
         self.account_search_entry.bind(
-            "<Control-a>",
-            lambda x: self.account_search_entry.selection_range(0, "end") or "break",
+            '<Control-a>',
+            lambda x: self.account_search_entry.selection_range(0, 'end') or "break"
         )
 
         self.accounts_listbox = tk.Listbox(accounts_frame)
         self.accounts_listbox.pack(expand=True, fill="both", padx=5)
         self.accounts_listbox.bind("<<ListboxSelect>>", self.on_account_select)
 
+        # pagination controls for accounts list
         acct_pag_frame = tk.Frame(accounts_frame)
         acct_pag_frame.pack(fill="x", padx=5, pady=5)
         prev_acct_btn = tk.Button(acct_pag_frame, text="prev", command=self.prev_accounts_page)
@@ -483,45 +379,33 @@ class chatapp(tk.Tk):
         next_acct_btn = tk.Button(acct_pag_frame, text="next", command=self.next_accounts_page)
         next_acct_btn.pack(side="left", expand=True, fill="x")
 
-        # right column: messages area using a scrollable canvas and a frame container
+        # right column: messages area and message input
         messages_frame = tk.Frame(paned)
         paned.add(messages_frame)
 
-        self.messages_canvas = tk.Canvas(messages_frame)
-        self.messages_canvas.pack(side="left", fill="both", expand=True)
-
-        self.messages_scroll = tk.Scrollbar(
-            messages_frame, orient="vertical", command=self.messages_canvas.yview
-        )
-        self.messages_scroll.pack(side="right", fill="y")
-        self.messages_canvas.configure(yscrollcommand=self.messages_scroll.set)
-
-        self.messages_container = tk.Frame(self.messages_canvas)
-        self.messages_container.bind(
-            "<Configure>",
-            lambda e: self.messages_canvas.configure(
-                scrollregion=self.messages_canvas.bbox("all")
-            ),
-        )
-        self.messages_canvas.create_window((0, 0), window=self.messages_container, anchor="nw")
+        self.messages_text = tk.Text(messages_frame, state="disabled", wrap="word")
+        self.messages_text.pack(expand=True, fill="both", padx=5, pady=5)
+        # msg_scroll = tk.Scrollbar(messages_frame, command=self.messages_text.yview)
+        # msg_scroll.pack(side="right", fill="y")
+        # self.messages_text.config(yscrollcommand=msg_scroll.set)
 
         # pagination controls for messages
-        msg_pag_frame = tk.Frame(frame)
+        msg_pag_frame = tk.Frame(messages_frame)
         msg_pag_frame.pack(fill="x", padx=5, pady=5)
         prev_msg_btn = tk.Button(msg_pag_frame, text="prev", command=self.prev_messages_page)
         prev_msg_btn.pack(side="left", expand=True, fill="x")
         next_msg_btn = tk.Button(msg_pag_frame, text="next", command=self.next_messages_page)
         next_msg_btn.pack(side="left", expand=True, fill="x")
 
-        # message input area at the bottom
-        input_frame = tk.Frame(frame)
+        # message input area at the bottom of messages area
+        input_frame = tk.Frame(messages_frame)
         input_frame.pack(fill="x", padx=5, pady=5)
         self.message_entry = tk.Entry(input_frame)
         self.message_entry.pack(side="left", expand=True, fill="x", padx=5)
         self.message_entry.bind("<Return>", self.send_message)
         self.message_entry.bind(
-            "<Control-a>",
-            lambda x: self.message_entry.selection_range(0, "end") or "break",
+            '<Control-a>',
+            lambda x: self.message_entry.selection_range(0, 'end') or "break"
         )
         send_btn = tk.Button(input_frame, text="send", command=self.send_message)
         send_btn.pack(side="left", padx=5)
@@ -541,9 +425,9 @@ class chatapp(tk.Tk):
     def update_accounts_list(self, pattern: str = "*") -> None:
         logging.debug("updating accounts list with pattern '%s'", pattern)
         try:
-            accounts = self.client.list_accounts(
-                pattern, self.account_offset, self.account_page_size
-            )
+            accounts = self.client.list_accounts(pattern,
+                                                 self.account_offset,
+                                                 self.account_page_size)
         except Exception as e:
             logging.error("failed to load accounts: %s", e)
             messagebox.showerror("error", f"failed to load accounts: {e}")
@@ -571,12 +455,12 @@ class chatapp(tk.Tk):
             self.selected_account = self.accounts_listbox.get(selection[0])
             logging.debug("selected conversation with account: %s", self.selected_account)
             self.update_messages_area()
+        # else:
+            # self.selected_account = None
+            # logging.debug("no account selected; showing all messages")
         self.message_offset = 0
 
     def update_messages_area(self) -> None:
-        # clear current messages in the container
-        for widget in self.messages_container.winfo_children():
-            widget.destroy()
         try:
             messages = self.client.read_messages(self.message_offset, self.message_page_size)
         except Exception as e:
@@ -584,30 +468,32 @@ class chatapp(tk.Tk):
             messagebox.showerror("error", f"failed to fetch messages: {e}")
             return
 
-        # if a conversation (account) is selected, filter messages
+        # filter messages if a conversation is selected
         if self.selected_account:
-            assert self.current_user
+            assert(self.current_user)
             filtered = []
             for msg in messages:
-                if msg.get("from") == self.selected_account or msg.get("to") == self.selected_account:
+                # only show messages between current user and selected account
+                assert("from" in msg and "to" in msg)
+                if self.selected_account == msg["from"] or self.selected_account == msg["to"]:
                     filtered.append(msg)
             messages = filtered
 
-        # display each message using our custom message_line widget
+        self.messages_text.config(state="normal")
+        self.messages_text.delete("1.0", tk.END)
         for msg in messages:
-            color = self.get_user_color(msg.get("from", "unknown"))
-            ml = message_line(self.messages_container, msg, self.delete_message, user_color=color)
-            ml.pack(fill="x", pady=2, padx=2)
-
-        self.messages_container.update_idletasks()
-        self.messages_canvas.configure(
-            scrollregion=self.messages_canvas.bbox("all")
-        )
-        logging.debug(
-            "messages area updated; offset %d, count %d",
-            self.message_offset,
-            self.message_page_size,
-        )
+            sender = msg.get("from", "unknown")
+            timestamp = datetime.fromtimestamp(msg.get("timestamp", 0)).strftime("%Y-%m-%d %H:%M:%S")
+            content = msg.get("content", "")
+            tag = sender  # use from as a text tag for color coding
+            if tag not in self.messages_text.tag_names():
+                colors = {"alice": "blue", "bob": "green", "me": "purple"}
+                color = colors.get(sender, "gray40")
+                self.messages_text.tag_config(tag, foreground=color)
+            self.messages_text.insert(tk.END, f"[{timestamp}] {sender}: {content}\n", tag)
+        self.messages_text.config(state="disabled")
+        logging.debug("messages area updated; offset %d, count %d",
+                      self.message_offset, self.message_page_size)
 
     def prev_messages_page(self) -> None:
         if self.message_offset >= self.message_page_size:
@@ -639,16 +525,6 @@ class chatapp(tk.Tk):
         self.message_entry.delete(0, tk.END)
         self.update_messages_area()
 
-    def delete_message(self, message_id: int) -> None:
-        logging.info("attempting to delete message with id %d", message_id)
-        try:
-            self.client.delete_message(message_id)
-        except Exception as e:
-            logging.error("failed to delete message: %s", e)
-            messagebox.showerror("error", f"failed to delete message: {e}")
-            return
-        self.update_messages_area()
-
     def open_settings(self) -> None:
         logging.debug("opening settings window")
         settings_win = tk.Toplevel(self)
@@ -662,7 +538,9 @@ class chatapp(tk.Tk):
         per_page_entry.pack(pady=5)
 
         delete_btn = tk.Button(
-            settings_win, text="delete account", command=self.delete_account
+            settings_win,
+            text="delete account",
+            command=self.delete_account
         )
         delete_btn.pack(pady=5)
 
@@ -692,14 +570,60 @@ class chatapp(tk.Tk):
             messagebox.showerror("error", f"failed to delete account: {e}")
             return
         messagebox.showinfo("account deleted", "your account has been deleted")
+        # return to login screen, destroying chat frame
         self.chat_frame.destroy()
         self._create_login_frame()
 
-    def get_user_color(self, username: str) -> str:
-        if username not in self.user_color_map:
-            idx = len(self.user_color_map) % len(USER_COLORS)
-            self.user_color_map[username] = USER_COLORS[idx]
-        return self.user_color_map[username]
+    def open_settings_backup(self) -> None:
+        # TODO: Remove this legacy code
+        logging.debug("opening settings window")
+        settings_win = tk.Toplevel(self)
+        settings_win.title("settings")
+        settings_win.geometry("300x250")
+
+        # messages per page setting
+        lbl = tk.Label(settings_win, text="messages per page:")
+        lbl.pack(pady=10)
+        per_page_entry = tk.Entry(settings_win)
+        per_page_entry.insert(0, str(self.message_page_size))
+        per_page_entry.pack(pady=5)
+
+        # theme selection section
+        style_lbl = tk.Label(settings_win, text="select theme:")
+        style_lbl.pack(pady=10)
+        style = ttk.Style()
+        available_themes = style.theme_names()  # list available themes
+        theme_var = tk.StringVar(settings_win)
+        theme_var.set(style.theme_use())  # current theme
+
+        theme_menu = tk.OptionMenu(settings_win, theme_var, *available_themes)
+        theme_menu.pack(pady=5)
+
+        def apply_theme() -> None:
+            selected_theme = theme_var.get()
+            style.theme_use(selected_theme)
+            logging.info("theme applied: %s", selected_theme)
+            messagebox.showinfo("theme applied", f"applied theme: {selected_theme}")
+
+        apply_theme_btn = tk.Button(settings_win, text="apply theme", command=apply_theme)
+        apply_theme_btn.pack(pady=5)
+
+        def save_settings() -> None:
+            try:
+                new_val = int(per_page_entry.get().strip())
+                if new_val <= 0:
+                    raise ValueError
+                self.message_page_size = new_val
+                settings_win.destroy()
+                self.message_offset = 0
+                self.update_messages_area()
+                logging.info("settings updated: message_page_size set to %d", new_val)
+            except ValueError:
+                logging.error("invalid value entered for messages per page")
+                messagebox.showerror("error", "enter a valid positive number")
+
+        save_btn = tk.Button(settings_win, text="save", command=save_settings)
+        save_btn.pack(pady=10)
 
 
 if __name__ == "__main__":
@@ -707,10 +631,9 @@ if __name__ == "__main__":
         description="irc/gmail hybrid chat application"
     )
     parser.add_argument(
-        "-v",
-        "--verbose",
+        "-v", "--verbose",
         action="store_true",
-        help="enable verbose logging (default shows errors only)",
+        help="enable verbose logging (default shows errors only)"
     )
     args = parser.parse_args()
 
@@ -718,9 +641,12 @@ if __name__ == "__main__":
     logging.basicConfig(
         level=log_level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+        datefmt="%Y-%m-%d %H:%M:%S"
     )
     logging.info("starting chat application")
     app = chatapp("localhost", 12345)
     app.mainloop()
     logging.info("chat application closed")
+
+
+
