@@ -177,7 +177,8 @@ class chatapp(tk.Tk):
         self._create_chat_frame()
 
     # ---------- signup screen -----------
-    def _create_signup_frame(self) -> None:
+    def _create_signup_frame_backup(self) -> None:
+        # TODO: Remove this legacy code
         logging.debug("creating signup frame")
         frame = tk.Frame(self)
         frame.pack(expand=True, fill="both")
@@ -194,8 +195,11 @@ class chatapp(tk.Tk):
             lambda x: self.signup_username_entry.selection_range(0, 'end') or "break"
         )
 
-        check_btn = tk.Button(frame, text="check availability", command=self.check_username_availability)
+        check_btn = tk.Button(frame, text="Continue", command=self.check_username_availability)
         check_btn.pack(pady=5)
+
+        # How do I make these labels appear only after self.check_username_availability succeeds
+        # by setting self.signup_available = True?
 
         pass_lbl = tk.Label(frame, text="password:")
         pass_lbl.pack()
@@ -209,11 +213,67 @@ class chatapp(tk.Tk):
         signup_btn = tk.Button(frame, text="sign up", command=self.signup)
         signup_btn.pack(pady=20)
 
-        switch_btn = tk.Button(frame, text="already have an account? login", command=self._switch_to_login)
-        switch_btn.pack(pady=10)
+        # switch_btn = tk.Button(frame, text="already have an account? login", command=self._switch_to_login)
+        # switch_btn.pack(side="bottom", pady=10)
 
         self.signup_frame = frame
         logging.debug("signup frame created")
+
+    def _create_signup_frame(self) -> None:
+        logging.debug("creating signup frame")
+        frame = tk.Frame(self)
+        frame.pack(expand=True, fill="both")
+
+        # Container for password fields (initially hidden)
+        self.password_container = tk.Frame(frame)
+        
+        title_lbl = tk.Label(frame, text="create account", font=("arial", 24))
+        title_lbl.pack(pady=20)
+
+        # Username Section
+        user_lbl = tk.Label(frame, text="username:")
+        user_lbl.pack()
+        self.signup_username_entry = tk.Entry(frame)
+        self.signup_username_entry.pack(pady=5)
+        self.signup_username_entry.bind(
+            '<Control-a>',
+            lambda x: self.signup_username_entry.selection_range(0, 'end') or "break"
+        )
+
+        check_btn = tk.Button(frame, text="Continue", command=self.check_username_availability)
+        check_btn.pack(pady=5)
+
+        # Password Section (initially hidden)
+        self.status_label = tk.Label(frame, text="")  # For showing messages
+        self.pass_lbl = tk.Label(self.password_container, text="password:")
+        self.signup_password_entry = tk.Entry(self.password_container, show="*")
+        self.signup_password_entry.bind(
+            '<Control-a>',
+            lambda x: self.signup_password_entry.selection_range(0, 'end') or "break"
+        )
+        self.signup_btn = tk.Button(self.password_container, text="sign up", command=self.signup)
+
+        # Navigation
+        # switch_btn = tk.Button(frame, text="already have an account? login", command=self._switch_to_login)
+        # switch_btn.pack(pady=10)
+
+        self.signup_frame = frame
+        logging.debug("signup frame created")
+
+    def show_password_fields(self):
+        """Show password fields after successful username check"""
+        self.status_label.config(text="Username available! Choose a password")
+        self.status_label.pack(pady=5)
+        
+        # Pack password container and its children
+        self.password_container.pack()
+        self.pass_lbl.pack()
+        self.signup_password_entry.pack(pady=5)
+        self.signup_btn.pack(pady=20)
+
+    def hide_password_fields(self):
+        """Does the opposite of show_password_fields"""
+        self.password_container.pack_forget()
 
     def check_username_availability(self) -> None:
         username = self.signup_username_entry.get().strip()
@@ -228,13 +288,24 @@ class chatapp(tk.Tk):
             messagebox.showerror("error", str(e))
             return
         if available:
-            messagebox.showinfo("available", "username is available")
             logging.info("username '%s' is available", username)
+            self.status_label.config(text="Username available. Enter a password to create your account.", fg="green")
             self.signup_available = True
+            self.show_password_fields()
+            if hasattr(self, "login_link"):
+                self.login_link.pack_forget()  # remove login link if it was added before
         else:
-            messagebox.showerror("username taken", "account already exists")
             logging.warning("username '%s' is already taken", username)
             self.signup_available = False
+            self.status_label.config(text="Username is already taken. Pick a different username or", fg="red")
+            self.status_label.pack(pady=5)
+
+            # create a clickable "log in" link
+            if not hasattr(self, "login_link"):
+                self.login_link = tk.Label(self.signup_frame, text="log in", fg="cyan", cursor="hand2")
+                self.login_link.bind("<Button-1>", lambda e: self._switch_to_login())
+                self.login_link.pack(pady=5)
+            self.hide_password_fields()
 
     def signup(self) -> None:
         username = self.signup_username_entry.get().strip()
@@ -287,7 +358,7 @@ class chatapp(tk.Tk):
         paned.add(accounts_frame)
 
         search_lbl = tk.Label(accounts_frame, text="search:")
-        search_lbl.pack(anchor="nw", padx=5, pady=(5, 0))
+        search_lbl.pack(anchor="nw", padx=5, pady=(0, 0))
         self.account_search_entry = tk.Entry(accounts_frame)
         self.account_search_entry.pack(fill="x", padx=5, pady=(0, 5))
         self.account_search_entry.bind("<Return>", self.on_account_search)
@@ -314,9 +385,9 @@ class chatapp(tk.Tk):
 
         self.messages_text = tk.Text(messages_frame, state="disabled", wrap="word")
         self.messages_text.pack(expand=True, fill="both", padx=5, pady=5)
-        msg_scroll = tk.Scrollbar(messages_frame, command=self.messages_text.yview)
-        msg_scroll.pack(side="right", fill="y")
-        self.messages_text.config(yscrollcommand=msg_scroll.set)
+        # msg_scroll = tk.Scrollbar(messages_frame, command=self.messages_text.yview)
+        # msg_scroll.pack(side="right", fill="y")
+        # self.messages_text.config(yscrollcommand=msg_scroll.set)
 
         # pagination controls for messages
         msg_pag_frame = tk.Frame(messages_frame)
@@ -417,7 +488,7 @@ class chatapp(tk.Tk):
             tag = sender  # use from as a text tag for color coding
             if tag not in self.messages_text.tag_names():
                 colors = {"alice": "blue", "bob": "green", "me": "purple"}
-                color = colors.get(sender, "black")
+                color = colors.get(sender, "gray40")
                 self.messages_text.tag_config(tag, foreground=color)
             self.messages_text.insert(tk.END, f"[{timestamp}] {sender}: {content}\n", tag)
         self.messages_text.config(state="disabled")
