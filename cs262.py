@@ -5,6 +5,8 @@ from datetime import datetime
 import logging
 import argparse
 
+from client import JSONClient, MockClient
+
 USER_COLORS = [
     "#1f77b4",  # a cool blue
     "#ff7f0e",  # a warm orange
@@ -254,7 +256,7 @@ class message_line(tk.Frame):
 
 
 class chatapp(tk.Tk):
-    def __init__(self, host: str, port: int) -> None:
+    def __init__(self, client, host: str, port: int) -> None:
         super().__init__()
         self.title("(c)hatsystem2620")
         self.geometry("800x600")
@@ -732,6 +734,6 @@ if __name__ == "__main__":
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     logging.info("starting chat application")
-    app = chatapp("localhost", 12345)
+    app = chatapp(MockClient, "localhost", 12345)
     app.mainloop()
     logging.info("chat application closed")
