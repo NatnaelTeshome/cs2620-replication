@@ -2,12 +2,20 @@ import selectors
 import socket
 import json
 import hashlib
+import logging
+
+logging.basicConfig(level=logging.DEBUG, format='[%(asctime)s] [%(levelname)s] %(message)s')
 
 with open("config.json", "r") as file:
-    config = json.load(file)
+    try:
+        config = json.load(file)
+    except Exception as e:
+        print(e)
+        logging.error(f"failed to load config: {e}")
+        config = {}
 
-HOST = config["HOST"]
-PORT = config["PORT"]
+HOST = config.get("HOST", "localhost")
+PORT = config.get("PORT", 12345)
 
 accounts = {}
 global_message_id = 0
@@ -32,12 +40,14 @@ class ClientState:
         self.in_buffer = ""
         self.out_buffer = []
         self.current_user = None
+        logging.debug(f"new clientstate created for {self.addr}")
 
     def queue_message(self, message_str):
         """
         Add a string (JSON-serialized response + newline) to the output buffer.
         """
         self.out_buffer.append(message_str)
+        logging.debug(f"queued message for {self.addr}: {message_str.strip()}")
 
     def close(self):
         """
@@ -45,14 +55,16 @@ class ClientState:
         """
         try:
             self.sock.close()
-        except OSError:
-            pass
+            logging.debug(f"closed connection for {self.addr}")
+        except OSError as e:
+            logging.error(f"error closing connection for {self.addr}: {e}")
 
 class ChatServer:
     def __init__(self, host, port):
         self.host = host
         self.port = port
         self.selector = selectors.DefaultSelector()
+        logging.debug(f"chatserver initialized on {host}:{port}")
 
         # NEW: Keep track of which users are currently logged in.
         # Maps username -> ClientState
@@ -68,6 +80,7 @@ class ChatServer:
 
         self.selector.register(listen_sock, selectors.EVENT_READ, data=None)
         print(f"[SERVER] Listening on {self.host}:{self.port} (selectors-based)")
+        logging.info(f"listening on {self.host}:{self.port} (selectors-based)")
 
         try:
             while True:
@@ -79,13 +92,16 @@ class ChatServer:
                         self.service_connection(key, mask)
         except KeyboardInterrupt:
             print("[SERVER] Shutting down server (CTRL+C).")
+            logging.info("server shutdown via keyboard interrupt")
         finally:
             self.selector.close()
+            logging.debug("selector closed")
 
     def accept_connection(self, sock):
         """Accept a new incoming client connection."""
         conn, addr = sock.accept()
         print(f"[SERVER] Accepted connection from {addr}")
+        logging.info(f"accepted connection from {addr}")
         conn.setblocking(False)
         client_state = ClientState(conn)
         self.selector.register(conn, selectors.EVENT_READ | selectors.EVENT_WRITE, data=client_state)
@@ -103,7 +119,9 @@ class ChatServer:
         """Read any incoming data, parse it by lines, handle JSON commands."""
         try:
             data = client_state.sock.recv(1024)
-        except Exception:
+            logging.debug(f"received data from {client_state.addr}: {len(data)} bytes")
+        except Exception as e:
+            logging.error(f"error reading from {client_state.addr}: {e}")
             data = None
 
         if data:
@@ -115,6 +133,7 @@ class ChatServer:
                     client_state.in_buffer = remainder
                     line = line.strip()
                     if line:
+                        logging.debug(f"processing line from {client_state.addr}: {line}")
                         self.process_command(client_state, line)
                 else:
                     break
@@ -127,7 +146,9 @@ class ChatServer:
             msg_str = client_state.out_buffer.pop(0)
             try:
                 client_state.sock.sendall(msg_str.encode('utf-8'))
-            except Exception:
+                logging.debug(f"sent message to {client_state.addr}: {msg_str.strip()}")
+            except Exception as e:
+                logging.error(f"error sending message to {client_state.addr}: {e}")
                 self.disconnect_client(client_state)
                 break
 
@@ -137,14 +158,17 @@ class ChatServer:
         """
         try:
             request = json.loads(line)
+            logging.debug(f"decoded json from {client_state.addr}: {request}")
         except json.JSONDecodeError:
+            logging.error(f"json decode error from {client_state.addr}: {line}")
             self.send_response(client_state, success=False, message="Invalid JSON.")
             return
 
         action = request.get("action", "").upper()
+        logging.info(f"received action '{action}' from {client_state.addr}")
 
         if action == "USERNAME":
-            self.check_username(request)
+            self.check_username(client_state, request)
         elif action == "CREATE":
             self.create_account(client_state, request)
         elif action == "LOGIN":
@@ -173,29 +197,43 @@ class ChatServer:
         Enqueue a JSON response message for the client to read.
         """
         if client_state is None:
+            logging.debug("No client_state provided!")
             return  # If no client_state to respond to, just skip
         resp = {"success": success, "message": message}
         if data is not None:
             resp["data"] = data
         resp_str = json.dumps(resp) + "\n"
         client_state.queue_message(resp_str)
+        logging.debug(f"response sent to {client_state.addr}: {resp}")
+
+    def push_event(self, client_state, event_name: str, event_payload: dict) -> None:
+        """
+        Enqueue a JSON event notification for the client to read.
+        E.g., a new message has been received for the client to read
+        """
+        push_msg = {
+            "event": event_name,
+            "data": event_payload
+        }
+        push_str = json.dumps(push_msg) + "\n"
+        client_state.queue_message(push_str)
+        logging.debug(f"pushed event '{event_name}' to {client_state.addr}: {event_payload}")
 
     # Check if username exists
-    def check_username(self, request):
+    def check_username(self, client_state, request):
         """Endpoint to check if a username exists."""
         username = request.get("username", "")
         if not username:
-            # We have no client_state to respond to here (in original code).
+            logging.error("No username provided")
+            self.send_response(client_state, success=False, message="Username not provided.")
             return
         
         if username in accounts:
-            # Typically you'd respond to the *requester*,
-            # but original code just sends a success/fail with no state.
-            pass
+            logging.debug("Username %s already taken", username)
+            self.send_response(client_state, success=True, message="Username exists.")
         else:
-            pass
-        # No changes; if you actually want to return something, you'd do:
-        # self.send_response(client_state, success=..., message=...)
+            logging.debug("Username %s does not exists", username)
+            self.send_response(client_state, success=False, message="Username does not exist.")
 
     # Create account
     def create_account(self, client_state, request):
@@ -205,10 +243,12 @@ class ChatServer:
 
         if not username or not password_hash:
             self.send_response(client_state, success=False, message="Username or password not provided.")
+            logging.warning(f"create_account failed: missing username or password from {client_state.addr}")
             return
 
         if username in accounts:
             self.send_response(client_state, success=False, message="Username already exists.")
+            logging.warning(f"create_account failed: username '{username}' already exists from {client_state.addr}")
             return
 
         accounts[username] = {
@@ -223,6 +263,7 @@ class ChatServer:
 
         msg = f"New account '{username}' created and logged in."
         self.send_response(client_state, success=True, message=msg)
+        logging.info(f"account '{username}' created and logged in from {client_state.addr}")
 
     # login
     def handle_login(self, client_state, request):
@@ -232,27 +273,28 @@ class ChatServer:
         if not username or not password_hash:
             self.send_response(client_state, success=False,
                                message="Username or password hash missing.")
+            logging.warning(f"handle_login failed: missing credentials from {client_state.addr}")
             return
 
         if username not in accounts:
             self.send_response(client_state, success=False,
                                message="No such user.")
+            logging.warning(f"handle_login failed: no such user '{username}' from {client_state.addr}")
             return
 
         # Check password
         if accounts[username]["password_hash"] != password_hash:
             self.send_response(client_state, success=False,
                                message="Incorrect password.")
+            logging.warning(f"handle_login failed: incorrect password for '{username}' from {client_state.addr}")
             return
 
         # If another ClientState had been logged in, remove it. 
-        # (Optional: depends on whether you want to allow multi-logins.)
         if username in self.logged_in_users:
-            # you could forcibly disconnect the old session if desired,
-            # or just overwrite. We'll just overwrite for simplicity:
             old_state = self.logged_in_users[username]
             if old_state is not client_state:
                 old_state.current_user = None
+                logging.info(f"overwriting existing session for '{username}' from {client_state.addr}")
 
         client_state.current_user = username
         self.logged_in_users[username] = client_state
@@ -260,11 +302,13 @@ class ChatServer:
         unread_count = get_unread_count(username)
         self.send_response(client_state, success=True,
                            message=f"Logged in as '{username}'. Unread messages: {unread_count}.")
+        logging.info(f"user '{username}' logged in from {client_state.addr}")
 
     def handle_list_accounts(self, client_state, request):
         if client_state.current_user is None:
             self.send_response(client_state, success=False,
                                message="Please log in first.")
+            logging.warning(f"handle_list_accounts failed: not logged in {client_state.addr}")
             return
 
         page_size = request.get("page_size", 10)
@@ -286,6 +330,7 @@ class ChatServer:
             "accounts": page_accounts
         }
         self.send_response(client_state, success=True, data=data)
+        logging.debug(f"listed accounts for {client_state.addr}: page {page_num}")
 
     def handle_send(self, client_state, request):
         """
@@ -295,6 +340,7 @@ class ChatServer:
         if client_state.current_user is None:
             self.send_response(client_state, success=False,
                                message="Please log in first.")
+            logging.warning(f"handle_send failed: not logged in {client_state.addr}")
             return
 
         sender = client_state.current_user
@@ -304,11 +350,13 @@ class ChatServer:
         if not recipient or not content:
             self.send_response(client_state, success=False,
                                message="Recipient or content missing.")
+            logging.warning(f"handle_send failed: missing recipient or content from {client_state.addr}")
             return
 
         if recipient not in accounts:
             self.send_response(client_state, success=False,
                                message="Recipient does not exist.")
+            logging.warning(f"handle_send failed: recipient '{recipient}' does not exist from {client_state.addr}")
             return
 
         global global_message_id
@@ -336,32 +384,27 @@ class ChatServer:
         # Acknowledge to the sender
         self.send_response(client_state, success=True,
                            message=f"Message sent to '{recipient}': {content}")
+        logging.info(f"user '{sender}' sent message id {msg_id} to '{recipient}'")
 
         # NEW: If the recipient is logged in, push a notification
         recipient_state = self.logged_in_users.get(recipient)
         if recipient_state:
-            # We can push either a small message or the full message data
-            push_data = {
-                "action": "NEW_MESSAGE",
-                "message": {
+            self.push_event(
+                recipient_state,
+                "NEW_MESSAGE",
+                {
                     "id": msg_id,
                     "sender": sender,
                     "content": content
                 }
-            }
-            # Use send_response (or a dedicated push method).
-            # Mark success=True so the client knows it's a valid push event
-            self.send_response(
-                recipient_state,
-                success=True,
-                message=f"New message from '{sender}'",
-                data=push_data
             )
+            logging.info(f"pushed new message event to '{recipient}'")
 
     def handle_read(self, client_state, request):
         if client_state.current_user is None:
             self.send_response(client_state, success=False,
                                message="Please log in first.")
+            logging.warning(f"handle_read failed: not logged in {client_state.addr}")
             return
 
         username = client_state.current_user
@@ -407,6 +450,7 @@ class ChatServer:
                     "remaining": max(0, total_msgs - end_idx)
                 }
             )
+            logging.info(f"user '{username}' read conversation with '{chat_partner}'")
         else:
             # Read from the 'messages' list (unread only)
             user_msgs = accounts[username]["messages"]
@@ -443,11 +487,13 @@ class ChatServer:
                     "remaining_unread": max(0, total_unread - end_index)
                 }
             )
+            logging.info(f"user '{username}' read {len(to_read)} messages (unread)")
 
     def handle_delete_message(self, client_state, request):
         if client_state.current_user is None:
             self.send_response(client_state, success=False,
                                message="Please log in first.")
+            logging.warning(f"handle_delete_message failed: not logged in {client_state.addr}")
             return
 
         username = client_state.current_user
@@ -472,11 +518,13 @@ class ChatServer:
         deleted_count = before_count - after_count
         msg = f"Deleted {deleted_count} messages."
         self.send_response(client_state, success=True, message=msg)
+        logging.info(f"user '{username}' deleted {deleted_count} messages")
 
     def handle_delete_account(self, client_state):
         if client_state.current_user is None:
             self.send_response(client_state, success=False,
                                message="Please log in first.")
+            logging.warning(f"handle_delete_account failed: not logged in {client_state.addr}")
             return
 
         username = client_state.current_user
@@ -487,17 +535,20 @@ class ChatServer:
         client_state.current_user = None
         self.send_response(client_state, success=True,
                            message=f"Account '{username}' deleted.")
+        logging.info(f"account '{username}' deleted")
 
     def handle_logout(self, client_state):
         if client_state.current_user is None:
             self.send_response(client_state, success=False,
                                message="No user is currently logged in.")
+            logging.warning(f"handle_logout failed: no user logged in from {client_state.addr}")
         else:
             user = client_state.current_user
             client_state.current_user = None
             self.logged_in_users.pop(user, None)
             self.send_response(client_state, success=True,
                                message=f"User '{user}' logged out.")
+            logging.info(f"user '{user}' logged out from {client_state.addr}")
 
     def disconnect_client(self, client_state):
         """
@@ -505,6 +556,7 @@ class ChatServer:
         If the client was logged in, remove it from logged_in_users.
         """
         print(f"[SERVER] Disconnecting {client_state.addr}")
+        logging.info(f"disconnecting {client_state.addr}")
         self.selector.unregister(client_state.sock)
 
         if client_state.current_user in self.logged_in_users:

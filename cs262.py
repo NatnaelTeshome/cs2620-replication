@@ -736,6 +736,6 @@ if __name__ == "__main__":
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     logging.info("starting chat application")
-    app = chatapp(MockClient, "localhost", 12345)
+    app = chatapp(JSONClient, "localhost", 12345)
     app.mainloop()
     logging.info("chat application closed")

@@ -1,42 +1,104 @@
-from abc import ABC, abstractmethod
 import socket
+import json
 import threading
-import json
-import struct
-from queue import Queue
-from typing import Optional
-
-import socket
-import json
+import queue
 import hashlib
-from typing import List, Optional, Dict, Any
-
+from typing import Optional, Dict, Any, List
 
 class JSONClient:
     def __init__(self, host: str, port: int) -> None:
         self.host = host
         self.port = port
-        # We do not really have a session token per server spec, but we leave the
-        # member in case you want to log extra data.
-        self.session_token: Optional[str] = None
         self.username: Optional[str] = None
-        # establish a persistent connection
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.connect((host, port))
+        # Queue to pass synchronous responses back to request methods.
+        self.response_queue = queue.Queue()
+        self.running = True
+        # Start a dedicated listener thread.
+        self.listener_thread = threading.Thread(
+            target=self._listen, daemon=True)
+        self.listener_thread.start()
+
+    def _listen(self) -> None:
+        """
+        Continuously listens for incoming data on the socket.
+        Push events (which contain an 'event' key) are handled immediately.
+        All other messages are placed on the response queue.
+        """
+        buffer = ""
+        while self.running:
+            try:
+                data = self.sock.recv(4096)
+                if not data:
+                    break  # connection closed
+                buffer += data.decode("utf-8")
+                while "\n" in buffer:
+                    line, buffer = buffer.split("\n", 1)
+                    if line.strip():
+                        try:
+                            message = json.loads(line.strip())
+                        except json.JSONDecodeError:
+                            continue  # Skip invalid JSON
+                        # Check for a push event.
+                        if "event" in message:
+                            self.handle_push_event(message)
+                        else:
+                            # Otherwise, this is the reply to a request.
+                            self.response_queue.put(message)
+            except Exception as e:
+                print("Error in listener thread:", e)
+                break
+
+    def handle_push_event(self, message: Dict[str, Any]) -> None:
+        """
+        Called from the listener thread when a push event arrives.
+        Update your GUI (or log the event) accordingly.
+        """
+        event = message.get("event")
+        data = message.get("data")
+        if event == "NEW_MESSAGE":
+            print(f"[PUSH] New message received: {data}")
+            # If using a GUI framework, you might want to schedule an update
+            # on the main thread here, e.g., via signals/slots in PyQt or Tkinter's after().
+        else:
+            print(f"[PUSH] Unknown event received: {message}")
 
     def _send_request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        # Optionally add session_token (ignored by server)
-        if self.session_token:
-            payload["session_token"] = self.session_token
+        """
+        Sends a JSON request to the server and waits for the corresponding response.
+        Any asynchronous push events are handled by the listener.
+        """
         data = json.dumps(payload) + "\n"
         self.sock.sendall(data.encode("utf-8"))
-        # Assume the response fits in one recv call.
-        response_data = self.sock.recv(4096).decode("utf-8").strip()
-        try:
-            response = json.loads(response_data)
-        except json.JSONDecodeError:
-            response = {"success": False, "message": "Invalid response from server."}
+        # Block until a response (non-push) is available.
+        response = self.response_queue.get()
         return response
+
+    def login(self, username: str, password: str) -> str:
+        payload = {
+            "action": "LOGIN",
+            "username": username,
+            "password_hash": self._hash_password(password)
+        }
+        response = self._send_request(payload)
+        if not response.get("success", False):
+            raise Exception(response.get("message", "Login failed"))
+        self.username = username
+        return response.get("message", "")
+
+    def send_message(self, recipient: str, message: str) -> None:
+        if not self.username:
+            raise Exception("Not logged in")
+        payload = {
+            "action": "SEND",
+            "recipient": recipient,
+            "content": message
+        }
+        response = self._send_request(payload)
+        if not response.get("success", False):
+            raise Exception(response.get("message", "Failed to send message"))
+        print("Message sent!")
 
     def account_exists(self, username: str) -> bool:
         payload = {
@@ -44,8 +106,6 @@ class JSONClient:
             "username": username
         }
         response = self._send_request(payload)
-        # The server returns success True if the username exists,
-        # and success False otherwise.
         return response.get("success", False)
 
     def create_account(self, username: str, password: str) -> None:
@@ -57,44 +117,10 @@ class JSONClient:
         response = self._send_request(payload)
         if not response.get("success", False):
             raise Exception(response.get("message", "Account creation failed"))
-        # Optionally log extra data if present
-        if "data" in response:
-            print("[DEBUG] Create account response data:", response["data"])
-        # Record the username after successful creation.
         self.username = username
 
-    def delete_account(self, username: str) -> None:
-        payload = {"action": "DELETE_ACCOUNT"}
-        response = self._send_request(payload)
-        if not response.get("success", False):
-            raise Exception(response.get("message", "Failed to delete account"))
-        self.username = None
-
-    def login(self, username: str, password: str) -> int:
-        payload = {
-            "action": "LOGIN",
-            "username": username,
-            "password_hash": self._hash_password(password)
-        }
-        response = self._send_request(payload)
-        if not response.get("success", False):
-            raise Exception(response.get("message", "Login failed"))
-
-        # Optionally log any extra data (e.g. session_token) returned:
-        if "data" in response:
-            print("[DEBUG] Login response data:", response["data"])
-
-        # Server login response is of the form:
-        #   "Logged in as 'username'. Unread messages: <count>."
-        msg = response.get("message", "")
-        self.username = username
-        return msg
-
-    def list_accounts(self,
-                      pattern: str = "*",
-                      offset: int = 0,
+    def list_accounts(self, pattern: str = "*", offset: int = 0,
                       limit: int = 10) -> List[str]:
-        # Calculate page number from offset and limit.
         page_num = (offset // limit) + 1
         payload = {
             "action": "LIST_ACCOUNTS",
@@ -105,54 +131,29 @@ class JSONClient:
         if not response.get("success", False):
             raise Exception(response.get("message", "Failed to list accounts"))
         accounts_data = response.get("data", {})
-        total_accounts = accounts_data.get("total_accounts", 0)
-        print(f"Fetched {total_accounts} accounts")
         accounts = accounts_data.get("accounts", [])
         if pattern and pattern != "*":
             accounts = [acct for acct in accounts if pattern in acct]
         return accounts
 
-    def read_messages(self,
-                      offset: int = 0,
-                      count: int = 10,
+    def read_messages(self, offset: int = 0, count: int = 10,
                       to_user: Optional[str] = None) -> List[Dict[str, Any]]:
-        # The server expects "page_size" and "page_num" keys.
         page_num = (offset // count) + 1
         payload = {
             "action": "READ",
             "page_size": count,
             "page_num": page_num
         }
-        # When reading a conversation with a partner, the server expects the key
-        # "chat_partner" (not "to_user")
         if to_user:
             payload["chat_partner"] = to_user
         response = self._send_request(payload)
         if not response.get("success", False):
             raise Exception(response.get("message", "Failed to read messages"))
         data = response.get("data", {})
-        # When chat_partner is provided, the server returns messages under "messages";
-        # otherwise, under "read_messages".
         if to_user:
-            messages = data.get("messages", [])
+            return data.get("messages", [])
         else:
-            messages = data.get("read_messages", [])
-        return messages
-
-    def send_message(self, recipient: str, message: str) -> None:
-        # Ensure that we are logged in.
-        if not self.username:
-            raise Exception("Not logged in")
-        payload = {
-            "action": "SEND",
-            "recipient": recipient,
-            "content": message
-        }
-        response = self._send_request(payload)
-        if not response.get("success", False):
-            raise Exception(response.get("message", "Failed to send message"))
-        if "data" in response:
-            print("[DEBUG] Send message response data:", response["data"])
+            return data.get("read_messages", [])
 
     def delete_message(self, message_id: int) -> None:
         payload = {
@@ -162,159 +163,26 @@ class JSONClient:
         response = self._send_request(payload)
         if not response.get("success", False):
             raise Exception(response.get("message", "Failed to delete message"))
-        if "data" in response:
-            print("[DEBUG] Delete message response data:", response["data"])
+        print("Message deleted.")
+
+    def delete_account(self, username: str) -> None:
+        payload = {"action": "DELETE_ACCOUNT"}
+        response = self._send_request(payload)
+        if not response.get("success", False):
+            raise Exception(response.get("message", "Failed to delete account"))
+        self.username = None
 
     def close(self) -> None:
+        self.running = False
         try:
             payload = {"action": "QUIT"}
-            self._send_request(payload)
+            self.sock.sendall((json.dumps(payload) + "\n").encode("utf-8"))
         except Exception:
             pass
         self.sock.close()
 
     def _hash_password(self, password: str) -> str:
         return hashlib.sha256(password.encode("utf-8")).hexdigest()
-
-
-class JSONClient2:
-    def __init__(self, host: str, port: int) -> None:
-        self.host = host
-        self.port = port
-        self.session_token: Optional[str] = None
-        self.username: Optional[str] = None
-        # establish a persistent connection
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.connect((host, port))
-
-    def _send_request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        # add session_token if available
-        if self.session_token:
-            payload["session_token"] = self.session_token
-        data = json.dumps(payload) + "\n"
-        self.sock.sendall(data.encode('utf-8'))
-        # we assume server response fits in a single recv; for larger responses adapt accordingly
-        response_data = self.sock.recv(4096).decode('utf-8').strip()
-        try:
-            response = json.loads(response_data)
-        except json.JSONDecodeError:
-            response = {"success": False, "message": "Invalid response from server."}
-        return response
-
-    def account_exists(self, username: str) -> bool:
-        # TODO: Get this fixed (Nati)
-        return False
-        # use LIST_ACCOUNTS to check if username exists
-        payload = {
-            "action": "LIST_ACCOUNTS",
-            "page_size": 100,
-            "page_num": 1
-        }
-        response = self._send_request(payload)
-        if not response.get("success", False):
-            raise Exception(response.get("message", "failed to list accounts"))
-        accounts = response.get("data", [])
-        return username in accounts
-
-    def create_account(self, username: str, password: str) -> None:
-        payload = {
-            "action": "CREATE",
-            "username": username,
-            "password_hash": self._hash_password(password)
-        }
-        response = self._send_request(payload)
-        if not response.get("success", False):
-            raise Exception(response.get("message", "account creation failed"))
-
-    def delete_account(self, username: str) -> None:
-        payload = {
-            "action": "DELETE_ACCOUNT"
-        }
-        response = self._send_request(payload)
-        if not response.get("success", False):
-            raise Exception(response.get("message", "failed to delete account"))
-
-    def login(self, username: str, password: str) -> int:
-        payload = {
-            "action": "LOGIN",
-            "username": username,
-            "password_hash": self._hash_password(password)
-        }
-        response = self._send_request(payload)
-        if not response.get("success", False):
-            raise Exception(response.get("message", "login failed"))
-        self.session_token = response.get("data", {}).get("session_token")
-        self.username = username
-        # assuming the server returns an unread count; otherwise adjust accordingly
-        unread = response.get("data", {}).get("unread", 0)
-        return unread
-
-    def list_accounts(self, pattern: str = "*", offset: int = 0, limit: int = 10) -> List[str]:
-        # assuming server's LIST_ACCOUNTS supports pagination only via page_size and page_num
-        page_num = (offset // limit) + 1
-        payload = {
-            "action": "LIST_ACCOUNTS",
-            "page_size": limit,
-            "page_num": page_num
-        }
-        response = self._send_request(payload)
-        if not response.get("success", False):
-            raise Exception(response.get("message", "failed to list accounts"))
-        accounts_info = response.get("data", {})
-        print(f"fetched {accounts_info.get('total_accounts', 0)} accounts")
-        accounts = []
-        if pattern != "*" and pattern:
-            accounts = [acct for acct in accounts_info.get("accounts", []) if pattern in acct]
-        return accounts
-
-    def read_messages(self, offset: int = 0, count: int = 10,
-                      to_user: Optional[str] = None) -> List[Dict[str, Any]]:
-        payload = {
-            "action": "READ",
-            "count": count
-        }
-        # optionally, include recipient to filter conversation
-        if to_user:
-            payload["to_user"] = to_user
-        response = self._send_request(payload)
-        if not response.get("success", False):
-            raise Exception(response.get("message", "failed to read messages"))
-        messages = response.get("data", [])
-        # simulate pagination locally if needed
-        return messages[offset: offset + count]
-
-    def send_message(self, recipient: str, message: str) -> None:
-        if not self.session_token:
-            raise Exception("not logged in")
-        payload = {
-            "action": "SEND",
-            "recipient": recipient,
-            "content": message
-        }
-        response = self._send_request(payload)
-        if not response.get("success", False):
-            raise Exception(response.get("message", "failed to send message"))
-
-    def delete_message(self, message_id: int) -> None:
-        payload = {
-            "action": "DELETE_MESSAGE",
-            "message_ids": [message_id]
-        }
-        response = self._send_request(payload)
-        if not response.get("success", False):
-            raise Exception(response.get("message", "failed to delete message"))
-
-    def close(self) -> None:
-        try:
-            payload = {"action": "QUIT"}
-            self._send_request(payload)
-        except Exception:
-            pass
-        self.sock.close()
-
-    def _hash_password(self, password: str) -> str:
-        return hashlib.sha256(password.encode('utf-8')).hexdigest()
-
 
 class MockClient:
     def __init__(self, host: str, port: int) -> None:
@@ -474,156 +342,3 @@ class MockClient:
         raise Exception("message not found")
 
 
-class AbstractClient(ABC):
-    """Abstract base class defining the client interface"""
-    
-    @abstractmethod
-    def send_request(self, request: dict) -> None:
-        """Send a request to the server"""
-        pass
-
-    @abstractmethod
-    def close(self) -> None:
-        """Close the connection"""
-        pass
-
-
-class Client(AbstractClient):
-    """Real client implementation that talks to the server"""
-
-    def __init__(self, host: str, port: int, incoming_queue: Queue):
-        self.host = host
-        self.port = port
-        self.incoming_queue = incoming_queue
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.lock = threading.Lock()
-        try:
-            self.sock.connect((self.host, self.port))
-        except Exception as e:
-            raise Exception(f"Cannot connect to server: {e}")
-        self.running = True
-        self.receiver_thread = threading.Thread(
-            target=self._receive_loop, daemon=True
-        )
-        self.receiver_thread.start()
-
-    def _send_msg(self, data: bytes) -> None:
-        """Internal method to send raw bytes with length prefix"""
-        try:
-            msg = struct.pack("!I", len(data)) + data
-            with self.lock:
-                self.sock.sendall(msg)
-        except Exception as e:
-            print(f"Error sending message: {e}")
-            self.incoming_queue.put({"type": "connection_error", "error": str(e)})
-
-    def send_request(self, request: dict) -> None:
-        """Send a JSON request to the server"""
-        try:
-            data = json.dumps(request).encode("utf-8")
-            self._send_msg(data)
-        except Exception as e:
-            print(f"Error sending request: {e}")
-            self.incoming_queue.put({"type": "connection_error", "error": str(e)})
-
-    def _recvall(self, n: int) -> Optional[bytes]:
-        """Internal method to receive exactly n bytes"""
-        data = b""
-        while len(data) < n:
-            packet = self.sock.recv(n - len(data))
-            if not packet:
-                return None
-            data += packet
-        return data
-
-    def _recv_msg(self) -> Optional[bytes]:
-        """Internal method to receive a length-prefixed message"""
-        raw_len = self._recvall(4)
-        if not raw_len:
-            return None
-        msg_len = struct.unpack("!I", raw_len)[0]
-        return self._recvall(msg_len)
-
-    def _receive_loop(self) -> None:
-        """Background thread for receiving messages"""
-        while self.running:
-            try:
-                data = self._recv_msg()
-                if not data:
-                    self.running = False
-                    self.incoming_queue.put({"type": "connection_closed"})
-                    break
-                response = json.loads(data.decode("utf-8"))
-                self.incoming_queue.put(response)
-            except Exception as e:
-                if self.running:
-                    print(f"Error receiving message: {e}")
-                    self.incoming_queue.put(
-                        {"type": "connection_error", "error": str(e)}
-                    )
-                break
-
-    def close(self) -> None:
-        """Close the connection gracefully"""
-        self.running = False
-        try:
-            self.sock.shutdown(socket.SHUT_RDWR)
-        except Exception:
-            pass
-        self.sock.close()
-
-
-class DummyClient(AbstractClient):
-    """Mock client for testing/development"""
-
-    def __init__(self, incoming_queue: Queue):
-        self.incoming_queue = incoming_queue
-        self.users = {"test": "test"}  # Dummy user database
-        self.messages = {}  # Dummy message storage
-
-    def send_request(self, request: dict) -> None:
-        """
-        Handle requests without actual networking.
-        Simulates server responses by putting appropriate messages in the queue.
-        """
-        command = request.get("command")
-        data = request.get("data", {})
-
-        if command == "login":
-            username = data.get("username")
-            self.incoming_queue.put({
-                "status": "success",
-                "message": f"Login successful. You have 0 unread messages."
-            })
-
-        elif command == "create_account":
-            username = data.get("username")
-            self.users[username] = data.get("password_hash")
-            self.incoming_queue.put({
-                "status": "success",
-                "message": "Account created successfully"
-            })
-
-        elif command == "send_message":
-            recipient = data.get("recipient")
-            message = data.get("message")
-            if recipient not in self.messages:
-                self.messages[recipient] = []
-            self.messages[recipient].append(message)
-            self.incoming_queue.put({
-                "status": "success",
-                "message": "Message sent successfully"
-            })
-
-        elif command == "validate_user":
-            username = data.get("username")
-            self.incoming_queue.put({
-                "status": "success",
-                "command": "validate_user",
-                "username": username,
-                "exists": True
-            })
-
-    def close(self) -> None:
-        """Nothing to close in dummy client"""
-        pass
