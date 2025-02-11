@@ -352,6 +352,7 @@ class chatapp(tk.Tk):
             "<Control-a>",
             lambda x: self.signup_username_entry.selection_range(0, "end") or "break",
         )
+        self.signup_username_entry.bind("<Return>", self.check_username_availability)
 
         check_btn = tk.Button(frame, text="continue", command=self.check_username_availability)
         check_btn.pack(pady=5)
@@ -363,6 +364,7 @@ class chatapp(tk.Tk):
             "<Control-a>",
             lambda x: self.signup_password_entry.selection_range(0, "end") or "break",
         )
+        self.signup_password_entry.bind("<Return>", self.signup)
         self.signup_btn = tk.Button(self.password_container, text="sign up", command=self.signup)
 
         self.signup_frame = frame
@@ -379,7 +381,7 @@ class chatapp(tk.Tk):
     def hide_password_fields(self):
         self.password_container.pack_forget()
 
-    def check_username_availability(self) -> None:
+    def check_username_availability(self, e: Optional[tk.Event] = None) -> None:
         username = self.signup_username_entry.get().strip()
         logging.debug("checking availability for username '%s'", username)
         if not username:
@@ -417,7 +419,7 @@ class chatapp(tk.Tk):
                 self.login_link.pack(pady=5)
             self.hide_password_fields()
 
-    def signup(self) -> None:
+    def signup(self, e: Optional[tk.Event] = None) -> None:
         username = self.signup_username_entry.get().strip()
         password = self.signup_password_entry.get().strip()
         logging.debug("attempting signup for username '%s'", username)
