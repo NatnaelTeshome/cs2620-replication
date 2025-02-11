@@ -3,6 +3,7 @@ import socket
 import json
 import hashlib
 import logging
+from datetime import datetime
 
 logging.basicConfig(level=logging.DEBUG, format='[%(asctime)s] [%(levelname)s] %(message)s')
 
@@ -366,7 +367,7 @@ class ChatServer:
         # 1) Add to the recipient's "messages" list
         new_msg = {
             "id": msg_id,
-            "sender": sender,
+            "from": sender,
             "content": content,
             "read": False
         }
@@ -394,7 +395,9 @@ class ChatServer:
                 "NEW_MESSAGE",
                 {
                     "id": msg_id,
-                    "sender": sender,
+                    "from": sender,
+                    "to": recipient,
+                    "timestamp": int(datetime.now().strftime("%s")),
                     "content": content
                 }
             )
@@ -472,7 +475,7 @@ class ChatServer:
             # Also mark them in 'conversations'
             conversations = accounts[username].get("conversations", {})
             for msg in to_read:
-                snd = msg["sender"]
+                snd = msg["from"]
                 if snd in conversations:
                     for conv_msg in conversations[snd]:
                         if conv_msg["id"] == msg["id"]:

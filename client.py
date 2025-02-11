@@ -6,7 +6,7 @@ import hashlib
 from typing import Optional, Dict, Any, List
 
 class JSONClient:
-    def __init__(self, host: str, port: int) -> None:
+    def __init__(self, host: str, port: int, on_msg_callback = None) -> None:
         self.host = host
         self.port = port
         self.username: Optional[str] = None
@@ -15,6 +15,9 @@ class JSONClient:
         # Queue to pass synchronous responses back to request methods.
         self.response_queue = queue.Queue()
         self.running = True
+        # Function called when server notifies us of new pending messages
+        self.on_msg_callback = on_msg_callback
+
         # Start a dedicated listener thread.
         self.listener_thread = threading.Thread(
             target=self._listen, daemon=True)
@@ -61,6 +64,8 @@ class JSONClient:
             print(f"[PUSH] New message received: {data}")
             # If using a GUI framework, you might want to schedule an update
             # on the main thread here, e.g., via signals/slots in PyQt or Tkinter's after().
+            if self.on_msg_callback:
+                self.on_msg_callback(data)
         else:
             print(f"[PUSH] Unknown event received: {message}")
 

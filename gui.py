@@ -1,1192 +1,751 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-import argparse
+from typing import List, Optional, Dict, Any
+from datetime import datetime
 import logging
-import sys
-import queue
-import hashlib
-from pathlib import Path
-from client import Client, DummyClient
+import argparse
 
-def setup_logging(verbosity: int, log_file: str = None) -> None:
-    """
-    Configure logging based on verbosity level and optional log file.
-    
-    Args:
-        verbosity: 0 (WARNING), 1 (INFO), 2 (DEBUG)
-        log_file: Optional path to log file
-    """
-    levels = {
-        0: logging.WARNING,
-        1: logging.INFO,
-        2: logging.DEBUG
-    }
-    level = levels.get(verbosity, logging.DEBUG)
-    
-    # Create formatter
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    # Configure root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(level)
-    
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
-    
-    # File handler if specified
-    if log_file:
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setFormatter(formatter)
-        root_logger.addHandler(file_handler)
+from client import JSONClient, MockClient
 
-def parse_arguments():
-    """
-    Parse command line arguments.
-    
-    Returns:
-        argparse.Namespace: Parsed command line arguments
-    """
-    parser = argparse.ArgumentParser(
-        description="Chat Client Application",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-    
-    parser.add_argument(
-        "--host",
-        default="localhost",
-        help="Server hostname or IP address"
-    )
-    
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=9999,
-        help="Server port number"
-    )
-    
-    parser.add_argument(
-        "--dummy",
-        action="store_true",
-        help="Use dummy client instead of real network client"
-    )
-    
-    parser.add_argument(
-        "-v", "--verbose",
-        action="count",
-        default=0,
-        help="Increase output verbosity (can be used multiple times)"
-    )
-    
-    parser.add_argument(
-        "--log-file",
-        type=str,
-        help="Path to log file (optional)"
-    )
-    
-    parser.add_argument(
-        "--theme",
-        choices=["light", "dark"],
-        default="light",
-        help="GUI theme to use"
-    )
-    
-    return parser.parse_args()
+USER_COLORS = [
+    "#1f77b4",  # a cool blue
+    "#ff7f0e",  # a warm orange
+    "#2ca02c",  # a fresh green
+    "#d62728",  # a bold red
+    "#9467bd",  # a muted purple
+    "#8c564b",  # a natural brown
+    "#e377c2",  # a soft pink
+    "#7f7f7f",  # balanced gray
+    "#bcbd22",  # earthy olive
+    "#17becf",  # crisp cyan
+]
+
+# dummy client for illustration purposes
+class client:
+    def __init__(self, host: str, port: int) -> None:
+        self.host = host
+        self.port = port
+        self.session_token = None
+        self.username: Optional[str] = None
+        # dummy storage for testing
+        self.accounts = {
+            "alice": "password",
+            "bob": "abc",
+            "natnael": "teshome",
+            "michal": "kurek",
+        }
+        self.messages = [
+            {
+                "id": 1,
+                "from": "alice",
+                "to": "michal",
+                "timestamp": 1739064990,
+                "content": "hey",
+            },
+            {
+                "id": 2,
+                "from": "bob",
+                "to": "michal",
+                "timestamp": 1739065050,
+                "content": "hello",
+            },
+            {
+                "id": 3,
+                "from": "alice",
+                "to": "michal",
+                "timestamp": 1739065110,
+                "content": "how r u?",
+            },
+            {
+                "id": 4,
+                "from": "michal",
+                "to": "alice",
+                "timestamp": 1739065170,
+                "content": "i'm good, u?",
+            },
+            {
+                "id": 5,
+                "from": "alice",
+                "to": "michal",
+                "timestamp": 1739065230,
+                "content": "doing alright",
+            },
+            {
+                "id": 6,
+                "from": "bob",
+                "to": "alice",
+                "timestamp": 1739065290,
+                "content": "nice to hear",
+            },
+            {
+                "id": 7,
+                "from": "michal",
+                "to": "bob",
+                "timestamp": 1739065350,
+                "content": "what's up?",
+            },
+            {
+                "id": 8,
+                "from": "bob",
+                "to": "michal",
+                "timestamp": 1739065410,
+                "content": "not much, just chilling",
+            },
+            {
+                "id": 9,
+                "from": "alice",
+                "to": "bob",
+                "timestamp": 1739065470,
+                "content": "same here",
+            },
+            {
+                "id": 10,
+                "from": "michal",
+                "to": "alice",
+                "timestamp": 1739065530,
+                "content": "wanna hang out later?",
+            },
+        ]
+        logging.debug(
+            "client initialized with host '%s' and port '%s'", host, port
+        )
+
+    def account_exists(self, username: str) -> bool:
+        exists = username in self.accounts
+        logging.debug("checking if account '%s' exists: %s", username, exists)
+        return exists
+
+    def create_account(self, username: str, password: str) -> None:
+        if username in self.accounts:
+            logging.error("attempt to create an account with taken username: %s", username)
+            raise Exception("username taken")
+        self.accounts[username] = password
+        logging.info("account '%s' created successfully", username)
+
+    def delete_account(self, username: str) -> None:
+        if username not in self.accounts:
+            logging.error("attempt to delete an account that doesn't exist: %s", username)
+            raise Exception("account does not exist")
+        del self.accounts[username]
+        logging.info("account '%s' deleted successfully", username)
+
+    def login(self, username: str, password: str) -> int:
+        if username not in self.accounts:
+            logging.error("login failed, account '%s' does not exist", username)
+            raise Exception("account does not exist")
+        if self.accounts[username] != password:
+            logging.error("login failed for account '%s' - bad password", username)
+            raise Exception("bad password")
+        self.session_token = "dummy_token"
+        unread_count = len(self.messages)
+        self.username = username
+        logging.info("account '%s' logged in with %d unread messages", username, unread_count)
+        return unread_count
+
+    def list_accounts(self, pattern: str = "*", offset: int = 0, limit: int = 10) -> List[str]:
+        accounts = list(self.accounts.keys())
+        if pattern != "*" and pattern:
+            accounts = [acct for acct in accounts if pattern in acct]
+        result = accounts[offset : offset + limit]
+        logging.debug(
+            "list_accounts with pattern '%s', offset %d, limit %d: %s",
+            pattern,
+            offset,
+            limit,
+            result,
+        )
+        return result
+
+    def read_messages(
+        self, offset: int = 0, count: int = 10, to_user: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        if to_user:
+            result = [
+                msg
+                for msg in self.messages
+                if (msg["to"] == self.username and msg["from"] == to_user)
+                or (msg["from"] == self.username and msg["to"] == to_user)
+            ]
+        else:
+            result = [
+                msg
+                for msg in self.messages
+                if msg["to"] == self.username or msg["from"] == self.username
+            ]
+        result = result[offset : offset + count]
+        logging.debug("read_messages with offset %d, count %d: %s", offset, count, result)
+        return result
+
+    def send_message(self, recipient: str, message: str) -> None:
+        if not self.session_token:
+            logging.error("attempt to send message while not logged in")
+            raise Exception("not logged in")
+        new_msg = {
+            "id": len(self.messages) + 1,
+            "from": self.username if self.username else "unknown",
+            "to": recipient,
+            "timestamp": int(datetime.now().strftime("%s")),
+            "content": message,
+        }
+        self.messages.append(new_msg)
+        logging.info("sent message to '%s': %s: %s", recipient, message, self.messages)
+
+    def delete_message(self, message_id: int) -> None:
+        for msg in self.messages:
+            if msg["id"] == message_id:
+                self.messages.remove(msg)
+                logging.info("deleted message with id %d", message_id)
+                return
+        logging.error("message with id %d not found", message_id)
+        raise Exception("message not found")
 
 
-class ChatClientGUI(tk.Tk):
-    """
-    Main application window with login, signup, and chat frames.
-    Handles client communication and message processing.
-    """
+# custom message line widget: shows a message and, on hover, an inline "delete" link
+class message_line(tk.Frame):
+    def __init__(self, parent, msg_data: Dict[str, Any], delete_callback,
+                 user_color: str = "gray40", *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
+        self.msg_data = msg_data
+        self.delete_callback = delete_callback
 
-    def __init__(self, args):
+        timestamp = datetime.fromtimestamp(msg_data.get("timestamp", 0)).strftime("%Y-%m-%d %H:%M:%S")
+        sender = msg_data.get("from", "unknown")
+        content = msg_data.get("content", "")
+        message_text = f"[{timestamp}] {sender}: {content}"
+
+        self.text_label = tk.Label(self, text=message_text, anchor="w", fg=user_color)
+        self.text_label.grid(row=0, column=0, sticky="w")
+
+        self.delete_label = tk.Label(self, text="delete", fg="red", cursor="hand2")
+        self.delete_label.grid(row=0, column=1, sticky="e", padx=(10, 0))
+        self.delete_label.grid_remove()
+
+        self.bind("<Enter>", self.on_enter)
+        self.bind("<Leave>", self.on_leave)
+        self.text_label.bind("<Enter>", self.on_enter)
+        self.text_label.bind("<Leave>", self.on_leave)
+        self.delete_label.bind("<Enter>", self.on_enter)
+        self.delete_label.bind("<Leave>", self.on_leave)
+        self.delete_label.bind("<Button-1>", lambda e: self.on_delete())
+
+        self.hide_job = None
+
+    def on_enter(self, event=None):
+        if self.hide_job is not None:
+            self.after_cancel(self.hide_job)
+            self.hide_job = None
+        self.delete_label.grid()
+
+    def on_leave(self, event=None):
+        self.hide_job = self.after(50, self.hide_delete)
+
+    def hide_delete(self):
+        self.delete_label.grid_remove()
+        self.hide_job = None
+
+    def on_delete(self):
+        self.delete_callback(self.msg_data["id"])
+
+
+class chatapp(tk.Tk):
+    def __init__(self, client, host: str, port: int) -> None:
         super().__init__()
-        self.logger = logging.getLogger(__name__)
-        self.args = args
-
-        # Basic window setup
-        self.title("Chat Client")
+        self.title("(c)hatsystem2620")
         self.geometry("800x600")
-        self.minsize(600, 400)
-        
-        # Initialize queue and client
-        self.incoming_queue = queue.Queue()
-        self.setup_client()
-        
-        # Style configuration
-        self.style = ttk.Style()
-        self.style.configure('Title.TLabel', font=('Helvetica', 16, 'bold'))
-        self.style.configure('Link.TLabel', foreground='blue', cursor='hand2')
+        self.client: client = client(host, port, self.on_new_message)
 
-        # Configure root window grid
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(0, weight=1)
+        self.current_user: Optional[str] = None
+        self.selected_account: Optional[str] = None
 
-        # Create main container
-        self.main_container = ttk.Frame(self)
-        self.main_container.grid(row=0, column=0, sticky="nsew")
+        # pagination state for accounts and messages
+        self.account_page_size: int = 10
+        self.account_offset: int = 0
+        self.message_page_size: int = 10
+        self.message_offset: int = 0
 
-        # Configure main container grid
-        self.main_container.grid_rowconfigure(0, weight=1)
-        self.main_container.grid_columnconfigure(0, weight=1)
+        # frames for different screens
+        self.login_frame: Optional[tk.Frame] = None
+        self.signup_frame: Optional[tk.Frame] = None
+        self.chat_frame: Optional[tk.Frame] = None
 
-        # Initialize frames
-        self.frames = {}
-        for F in (LoginFrame, SignupFrame, ChatFrame):
-            frame = F(self.main_container, self)
-            self.frames[F] = frame
-            frame.grid(row=0, column=0, sticky="nsew")
+        # defines unique colors for different users
+        self.user_color_map = {}
 
-        # Bind resize events and closing protocol
-        self.bind("<Configure>", self.on_resize)
-        self.protocol("WM_DELETE_WINDOW", self.on_closing)
-        
-        # Start with login frame
-        self.show_frame(LoginFrame)
-        
-        # Start polling the incoming queue
-        self.poll_incoming_queue()
-        
-        self.logger.info("GUI initialized successfully")
+        # local cache for messages
+        self.message_cache: List[Dict[str, Any]] = []
 
-    def setup_client(self):
-        """Initialize the appropriate client based on arguments."""
-        if self.args.dummy:
-            self.logger.info("Using dummy client")
-            self.client = DummyClient(self.incoming_queue)
-        else:
-            try:
-                self.logger.info(f"Connecting to {self.args.host}:{self.args.port}")
-                self.client = Client(self.args.host, self.args.port, self.incoming_queue)
-                self.logger.info("Successfully connected to server")
-            except Exception as e:
-                self.logger.error(f"Failed to connect to server: {e}")
-                if messagebox.askyesno(
-                    "Connection Error",
-                    "Failed to connect to server. Would you like to use dummy client instead?"
-                ):
-                    self.logger.info("Falling back to dummy client")
-                    self.client = DummyClient(self.incoming_queue)
-                else:
-                    self.logger.info("User chose to exit after connection failure")
-                    sys.exit(1)
+        logging.debug("application initialized")
+        self._create_login_frame()
 
-    def on_resize(self, event):
-        """Handle window resize events"""
-        if event.widget == self:
-            self.logger.debug(f"Resizing window to {event.width}x{event.height}")
-            # Configure the frames themselves
-            self.main_container.configure(width=event.width, height=event.height)
-            
-            # Update all frames to match the new size
-            for frame in self.frames.values():
-                frame.configure(width=event.width, height=event.height)
+    # ---------- login screen -----------
+    def _create_login_frame(self) -> None:
+        logging.debug("creating login frame")
+        frame = tk.Frame(self)
+        frame.pack(expand=True, fill="both")
 
-    def show_frame(self, frame_class):
-        """Brings the specified frame to the front."""
-        frame = self.frames[frame_class]
-        self.logger.debug(f"Switching to {frame_class.__name__}")
-        frame.tkraise()
+        title_lbl = tk.Label(frame, text="login", font=("arial", 24))
+        title_lbl.pack(pady=20)
 
-    def poll_incoming_queue(self):
-        """Process any incoming messages from the client"""
+        user_lbl = tk.Label(frame, text="username:")
+        user_lbl.pack()
+        self.login_username_entry = tk.Entry(frame)
+        self.login_username_entry.bind(
+            "<Control-a>",
+            lambda x: self.login_username_entry.selection_range(0, "end") or "break",
+        )
+        self.login_username_entry.pack(pady=5)
+
+        pass_lbl = tk.Label(frame, text="password:")
+        pass_lbl.pack()
+        self.login_password_entry = tk.Entry(frame, show="*")
+        self.login_password_entry.bind(
+            "<Control-a>",
+            lambda x: self.login_password_entry.selection_range(0, "end") or "break",
+        )
+        self.login_password_entry.bind("<Return>", lambda _x: self.login())
+        self.login_password_entry.pack(pady=5)
+
+        login_btn = tk.Button(frame, text="login", command=self.login)
+        login_btn.pack(pady=20)
+
+        switch_btn = tk.Button(frame, text="sign up", command=self._switch_to_signup)
+        switch_btn.pack(pady=10)
+
+        self.login_frame = frame
+        logging.debug("login frame created")
+
+    def login(self) -> None:
+        username = self.login_username_entry.get().strip()
+        password = self.login_password_entry.get().strip()
+        logging.debug("attempting login for user '%s'", username)
         try:
-            while True:
-                message = self.incoming_queue.get_nowait()
-                self.process_incoming_message(message)
-        except queue.Empty:
-            pass
-        self.after(100, self.poll_incoming_queue)
+            unread_count = self.client.login(username, password)
+        except Exception as e:
+            logging.error("login error for user '%s': %s", username, e)
+            messagebox.showerror("login error", str(e))
+            return
+        self.current_user = username
+        messagebox.showinfo("login", f"you have {unread_count} unread messages")
+        self.login_frame.destroy()
+        self._create_chat_frame()
 
-    def process_incoming_message(self, message):
-        """Handle messages received from the client"""
-        self.logger.debug(f"Processing message: {message}")
-        
-        if "status" in message:
-            status = message.get("status")
-            if status == "success":
-                if message.get("command") == "validate_user":
-                    chat_frame = self.frames[ChatFrame]
-                    username = message.get("username")
-                    exists = message.get("exists", False)
-                    chat_frame.handle_user_validation(exists, username)
-                else:
-                    info = message.get("message", "")
-                    if "Login successful" in info:
-                        self.show_frame(ChatFrame)
-                    messagebox.showinfo("Success", info)
-            else:
-                error = message.get("error", "Unexpected error")
-                self.logger.warning(f"Error from server: {error}")
-                messagebox.showerror("Error", error)
-        
-        elif "command" in message and message["command"] == "incoming_message":
-            sender = message["data"].get("sender")
-            text = message["data"].get("message")
-            self.logger.debug(f"Received message from {sender}: {text}")
-            chat_frame = self.frames[ChatFrame]
-            chat_frame.handle_incoming_message(sender, text)
-        
-        elif message.get("type") == "connection_closed":
-            self.logger.warning("Server closed the connection")
-            messagebox.showwarning("Connection", "Server closed the connection")
-        
-        elif message.get("type") == "connection_error":
-            error = message.get("error", "Unknown connection error")
-            self.logger.error(f"Connection error: {error}")
-            messagebox.showerror("Connection Error", error)
+    # ---------- signup screen -----------
+    def _create_signup_frame(self) -> None:
+        logging.debug("creating signup frame")
+        frame = tk.Frame(self)
+        frame.pack(expand=True, fill="both")
 
-    def on_closing(self):
-        """Handle window closing"""
-        self.logger.info("Application shutting down")
-        if self.client:
-            self.client.close()
-        self.destroy()
+        self.password_container = tk.Frame(frame)
 
+        title_lbl = tk.Label(frame, text="create account", font=("arial", 24))
+        title_lbl.pack(pady=20)
 
-class LoginFrame(ttk.Frame):
-    """Frame for user login."""
-
-    def __init__(self, parent, controller):
-        super().__init__(parent)
-        self.controller = controller
-        self.logger = logging.getLogger(__name__)
-        
-        # Make this frame expand to fill its container
-        self.grid_rowconfigure(1, weight=1)
-        self.grid_columnconfigure(1, weight=1)
-
-        # Create the center content frame
-        content_frame = ttk.Frame(self)
-        content_frame.grid(row=1, column=1)
-
-        # Title
-        title_label = ttk.Label(
-            content_frame, 
-            text="Login", 
-            style='Title.TLabel'
+        user_lbl = tk.Label(frame, text="username:")
+        user_lbl.pack()
+        self.signup_username_entry = tk.Entry(frame)
+        self.signup_username_entry.pack(pady=5)
+        self.signup_username_entry.bind(
+            "<Control-a>",
+            lambda x: self.signup_username_entry.selection_range(0, "end") or "break",
         )
-        title_label.pack(pady=(0, 20))
+        self.signup_username_entry.bind("<Return>", self.check_username_availability)
 
-        # Login form
-        form_frame = ttk.Frame(content_frame)
-        form_frame.pack(fill="x", padx=20)
+        check_btn = tk.Button(frame, text="continue", command=self.check_username_availability)
+        check_btn.pack(pady=5)
 
-        # Username
-        username_frame = ttk.Frame(form_frame)
-        username_frame.pack(fill="x", pady=5)
-        ttk.Label(username_frame, text="Username:").pack(side="left")
-        self.username_var = tk.StringVar()
-        self.username_entry = ttk.Entry(
-            username_frame, 
-            textvariable=self.username_var,
-            width=20
+        self.status_label = tk.Label(frame, text="")
+        self.pass_lbl = tk.Label(self.password_container, text="password:")
+        self.signup_password_entry = tk.Entry(self.password_container, show="*")
+        self.signup_password_entry.bind(
+            "<Control-a>",
+            lambda x: self.signup_password_entry.selection_range(0, "end") or "break",
         )
-        self.username_entry.pack(side="left", padx=(10, 0))
+        self.signup_password_entry.bind("<Return>", self.signup)
+        self.signup_btn = tk.Button(self.password_container, text="sign up", command=self.signup)
 
-        # Password
-        password_frame = ttk.Frame(form_frame)
-        password_frame.pack(fill="x", pady=5)
-        ttk.Label(password_frame, text="Password:").pack(side="left")
-        self.password_var = tk.StringVar()
-        self.password_entry = ttk.Entry(
-            password_frame,
-            textvariable=self.password_var,
-            show="*",
-            width=20
-        )
-        self.password_entry.pack(side="left", padx=(10, 0))
-        self.password_entry.bind("<Return>", lambda e: self.login())
+        self.signup_frame = frame
+        logging.debug("signup frame created")
 
-        # Login button
-        ttk.Button(
-            content_frame,
-            text="Login",
-            command=self.login
-        ).pack(pady=20)
+    def show_password_fields(self):
+        self.status_label.config(text="username available! choose a password")
+        self.status_label.pack(pady=5)
+        self.password_container.pack()
+        self.pass_lbl.pack()
+        self.signup_password_entry.pack(pady=5)
+        self.signup_btn.pack(pady=20)
 
-        # Signup link
-        signup_link = ttk.Label(
-            content_frame,
-            text="Don't have an account yet? Sign up here!",
-            style='Link.TLabel'
-        )
-        signup_link.pack(pady=(0, 20))
-        signup_link.bind(
-            "<Button-1>",
-            lambda e: controller.show_frame(SignupFrame)
-        )
+    def hide_password_fields(self):
+        self.password_container.pack_forget()
 
-    def login(self):
-        """Handle login attempt."""
-        username = self.username_var.get().strip()
-        password = self.password_var.get().strip()
-        
+    def check_username_availability(self, e: Optional[tk.Event] = None) -> None:
+        username = self.signup_username_entry.get().strip()
+        logging.debug("checking availability for username '%s'", username)
+        if not username:
+            messagebox.showerror("error", "enter a username")
+            return
+        try:
+            available = not self.client.account_exists(username)
+        except Exception as e:
+            logging.error("error when checking username availability: %s", e)
+            messagebox.showerror("error", str(e))
+            return
+        if available:
+            logging.info("username '%s' is available", username)
+            self.status_label.config(
+                text="username available. enter a password to create your account.",
+                fg="green",
+            )
+            self.signup_available = True
+            self.show_password_fields()
+            if hasattr(self, "login_link"):
+                self.login_link.pack_forget()
+        else:
+            logging.warning("username '%s' is already taken", username)
+            self.signup_available = False
+            self.status_label.config(
+                text="username is already taken. pick a different username or",
+                fg="red",
+            )
+            self.status_label.pack(pady=5)
+            if not hasattr(self, "login_link"):
+                self.login_link = tk.Label(
+                    self.signup_frame, text="log in", fg="cyan", cursor="hand2"
+                )
+                self.login_link.bind("<Button-1>", lambda e: self._switch_to_login())
+                self.login_link.pack(pady=5)
+            self.hide_password_fields()
+
+    def signup(self, e: Optional[tk.Event] = None) -> None:
+        username = self.signup_username_entry.get().strip()
+        password = self.signup_password_entry.get().strip()
+        logging.debug("attempting signup for username '%s'", username)
+        if not getattr(self, "signup_available", False):
+            messagebox.showerror("error", "choose a different username")
+            return
         if not username or not password:
-            self.logger.warning("Login attempted with empty fields")
-            messagebox.showerror("Error", "Please fill in all fields")
+            messagebox.showerror("error", "enter both username and password")
             return
-            
-        self.logger.info(f"Attempting login for user: {username}")
-        
-        # Hash password and send login request
-        hashed_password = hashlib.sha256(password.encode()).hexdigest()
-        self.controller.client.send_request({
-            "command": "login",
-            "data": {
-                "username": username,
-                "password_hash": hashed_password
-            }
-        })
-        
-        # Clear fields
-        self.username_var.set("")
-        self.password_var.set("")
-
-
-class SignupFrame(ttk.Frame):
-    """Frame for account creation."""
-
-    def __init__(self, parent, controller):
-        super().__init__(parent)
-        self.controller = controller
-        self.logger = logging.getLogger(__name__)
-
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(0, weight=1)
-
-        # Center container
-        center_frame = ttk.Frame(self)
-        center_frame.place(relx=0.5, rely=0.5, anchor="center")
-
-        # Title
-        title_label = ttk.Label(
-            center_frame, text="Sign Up", style='Title.TLabel'
-        )
-        title_label.pack(pady=(0, 20))
-
-        # Signup form
-        form_frame = ttk.Frame(center_frame)
-        form_frame.pack(fill="x", padx=20)
-
-        # Username
-        username_frame = ttk.Frame(form_frame)
-        username_frame.pack(fill="x", pady=5)
-        ttk.Label(username_frame, text="Username:").pack(side="left")
-        self.username_var = tk.StringVar()
-        self.username_entry = ttk.Entry(
-            username_frame,
-            textvariable=self.username_var,
-            width=20
-        )
-        self.username_entry.pack(side="left", padx=(10, 0))
-
-        # Password
-        password_frame = ttk.Frame(form_frame)
-        password_frame.pack(fill="x", pady=5)
-        ttk.Label(password_frame, text="Password:").pack(side="left")
-        self.password_var = tk.StringVar()
-        self.password_entry = ttk.Entry(
-            password_frame,
-            textvariable=self.password_var,
-            show="*",
-            width=20
-        )
-        self.password_entry.pack(side="left", padx=(10, 0))
-
-        # Confirm Password
-        confirm_frame = ttk.Frame(form_frame)
-        confirm_frame.pack(fill="x", pady=5)
-        ttk.Label(confirm_frame, text="Confirm:").pack(side="left")
-        self.confirm_var = tk.StringVar()
-        self.confirm_entry = ttk.Entry(
-            confirm_frame,
-            textvariable=self.confirm_var,
-            show="*",
-            width=20
-        )
-        self.confirm_entry.pack(side="left", padx=(10, 0))
-        self.confirm_entry.bind("<Return>", lambda e: self.create_account())
-
-        # Create Account button
-        ttk.Button(
-            center_frame,
-            text="Create Account",
-            command=self.create_account
-        ).pack(pady=20)
-
-        # Login link
-        login_link = ttk.Label(
-            center_frame,
-            text="Already have an account? Login here!",
-            style='Link.TLabel'
-        )
-        login_link.pack(pady=(0, 20))
-        login_link.bind(
-            "<Button-1>",
-            lambda e: controller.show_frame(LoginFrame)
-        )
-
-    def create_account(self):
-        """Handle account creation attempt."""
-        username = self.username_var.get().strip()
-        password = self.password_var.get().strip()
-        confirm = self.confirm_var.get().strip()
-        
-        if not username or not password or not confirm:
-            self.logger.warning("Account creation attempted with empty fields")
-            messagebox.showerror("Error", "Please fill in all fields")
-            return
-            
-        if password != confirm:
-            self.logger.warning("Password confirmation mismatch during account creation")
-            messagebox.showerror("Error", "Passwords do not match")
-            return
-            
-        self.logger.info(f"Attempting to create account for user: {username}")
-        
-        # Hash password and send create account request
-        hashed_password = hashlib.sha256(password.encode()).hexdigest()
-        self.controller.client.send_request({
-            "command": "create_account",
-            "data": {
-                "username": username,
-                "password_hash": hashed_password
-            }
-        })
-        
-        # Clear fields
-        self.username_var.set("")
-        self.password_var.set("")
-        self.confirm_var.set("")
-
-
-class ChatFrame2(ttk.Frame):
-    """Frame for chat interface with thread selection and conversation panels."""
-
-    def __init__(self, parent, controller):
-        super().__init__(parent)
-        self.controller = controller
-        self.logger = logging.getLogger(__name__)
-        self.threads = {}  # Dictionary to store chat history
-        self.current_thread = None
-
-        # Configure main frame to expand
-        self.pack_propagate(False)
-        
-        # Create horizontal paned window for resizable split
-        self.paned = ttk.PanedWindow(self, orient="horizontal")
-        self.paned.pack(fill="both", expand=True)
-
-        # Left panel (Thread Selection)
-        left_frame = ttk.Frame(self.paned)
-        self.paned.add(left_frame, weight=1)
-
-        # Configure left frame grid
-        left_frame.grid_columnconfigure(0, weight=1)
-        left_frame.grid_rowconfigure(1, weight=1)
-
-        # Threads label
-        ttk.Label(
-            left_frame, text="Conversations", style='Title.TLabel'
-        ).grid(row=0, column=0, pady=10, padx=5, sticky="w")
-
-        # Thread list with scrollbar
-        thread_frame = ttk.Frame(left_frame)
-        thread_frame.grid(row=1, column=0, sticky="nsew", padx=5)
-        thread_frame.grid_columnconfigure(0, weight=1)
-        thread_frame.grid_rowconfigure(0, weight=1)
-
-        self.thread_listbox = tk.Listbox(
-            thread_frame,
-            selectmode="single",
-            activestyle="none",
-            highlightthickness=1
-        )
-        self.thread_listbox.grid(row=0, column=0, sticky="nsew")
-        thread_scrollbar = ttk.Scrollbar(
-            thread_frame,
-            orient="vertical",
-            command=self.thread_listbox.yview
-        )
-        thread_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.thread_listbox.configure(yscrollcommand=thread_scrollbar.set)
-        self.thread_listbox.bind('<<ListboxSelect>>', self.on_thread_select)
-
-        # Search frame
-        search_frame = ttk.Frame(left_frame)
-        search_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=10)
-        search_frame.grid_columnconfigure(0, weight=1)
-
-        self.search_var = tk.StringVar()
-        search_entry = ttk.Entry(search_frame, textvariable=self.search_var)
-        search_entry.grid(row=0, column=0, sticky="ew", padx=(0, 5))
-        search_entry.bind("<Return>", lambda e: self.start_thread())
-
-        search_button = ttk.Button(
-            search_frame, text="New Chat", command=self.start_thread
-        )
-        search_button.grid(row=0, column=1)
-
-        # Right panel (Chat Area)
-        right_frame = ttk.Frame(self.paned)
-        self.paned.add(right_frame, weight=3)
-
-        # Configure right frame grid
-        right_frame.grid_columnconfigure(0, weight=1)
-        right_frame.grid_rowconfigure(1, weight=1)
-
-        # Chat header
-        self.header_var = tk.StringVar(value="Select a conversation")
-        self.header_label = ttk.Label(
-            right_frame,
-            textvariable=self.header_var,
-            style='Title.TLabel'
-        )
-        self.header_label.grid(row=0, column=0, pady=10, padx=5, sticky="w")
-
-        # Chat display with scrollbar
-        chat_frame = ttk.Frame(right_frame)
-        chat_frame.grid(row=1, column=0, sticky="nsew", padx=5)
-        chat_frame.grid_columnconfigure(0, weight=1)
-        chat_frame.grid_rowconfigure(0, weight=1)
-
-        self.chat_display = tk.Text(
-            chat_frame,
-            wrap="word",
-            state="disabled",
-            padx=5,
-            pady=5
-        )
-        self.chat_display.grid(row=0, column=0, sticky="nsew")
-        
-        chat_scrollbar = ttk.Scrollbar(
-            chat_frame,
-            orient="vertical",
-            command=self.chat_display.yview
-        )
-        chat_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.chat_display.configure(yscrollcommand=chat_scrollbar.set)
-
-        # Message entry
-        message_frame = ttk.Frame(right_frame)
-        message_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=10)
-        message_frame.grid_columnconfigure(0, weight=1)
-
-        self.message_var = tk.StringVar()
-        self.message_entry = ttk.Entry(
-            message_frame,
-            textvariable=self.message_var
-        )
-        self.message_entry.grid(row=0, column=0, sticky="ew", padx=(0, 5))
-        self.message_entry.bind("<Return>", lambda e: self.send_message())
-
-        send_button = ttk.Button(
-            message_frame,
-            text="Send",
-            command=self.send_message
-        )
-        send_button.grid(row=0, column=1)
-
-    def start_thread(self):
-        """Start a new conversation thread."""
-        username = self.search_var.get().strip()
-        if not username:
-            self.logger.warning("Attempted to start thread with empty username")
-            messagebox.showerror("Error", "Please enter a username")
-            return
-            
-        self.logger.info(f"Validating user: {username}")
-        self.controller.client.send_request({
-            "command": "validate_user",
-            "data": {"username": username}
-        })
-
-    def handle_user_validation(self, exists: bool, username: str):
-        """Handle the response from user validation."""
-        if exists:
-            self.logger.info(f"User {username} validated, starting thread")
-            if username not in self.threads:
-                self.threads[username] = []
-                self.thread_listbox.insert("end", username)
-            self.current_thread = username
-            self.header_var.set(f"Chat with {username}")
-            self.search_var.set("")
-            self.refresh_conversation_display()
-        else:
-            self.logger.warning(f"User {username} does not exist")
-            messagebox.showerror("Error", f"User '{username}' does not exist")
-
-    def on_thread_select(self, event):
-        """Handle thread selection from the listbox."""
-        selection = self.thread_listbox.curselection()
-        if selection:
-            username = self.thread_listbox.get(selection[0])
-            self.logger.debug(f"Selected thread: {username}")
-            self.current_thread = username
-            self.header_var.set(f"Chat with {username}")
-            self.refresh_conversation_display()
-
-    def refresh_conversation_display(self):
-        """Update the chat display with the current thread's messages."""
-        self.chat_display.configure(state="normal")
-        self.chat_display.delete(1.0, tk.END)
-        
-        if self.current_thread and self.current_thread in self.threads:
-            for message in self.threads[self.current_thread]:
-                self.chat_display.insert(tk.END, message + "\n")
-                
-        self.chat_display.configure(state="disabled")
-        self.chat_display.see(tk.END)
-
-    def handle_incoming_message(self, sender: str, text: str):
-        """Handle an incoming message from another user."""
-        self.logger.debug(f"Handling incoming message from {sender}: {text}")
-        self.add_message(sender, f"{sender}: {text}")
-
-    def add_message(self, thread: str, message: str):
-        """Add a message to a thread and update display if necessary."""
-        if thread not in self.threads:
-            self.threads[thread] = []
-            self.thread_listbox.insert("end", thread)
-        self.threads[thread].append(message)
-        if self.current_thread == thread:
-            self.refresh_conversation_display()
-
-    def send_message(self):
-        """Handle sending a message in the current thread."""
-        if not self.current_thread:
-            self.logger.warning("Attempted to send message without selecting thread")
-            messagebox.showerror("Error", "Please select a conversation first")
-            return
-            
-        message = self.message_var.get().strip()
-        if not message:
-            return
-            
-        self.logger.debug(f"Sending message to {self.current_thread}: {message}")
-        
-        # Add message to local thread history
-        self.add_message(self.current_thread, f"You: {message}")
-        
-        # Send message to server
-        self.controller.client.send_request({
-            "command": "send_message",
-            "data": {
-                "recipient": self.current_thread,
-                "message": message
-            }
-        })
-        
-        # Clear message entry
-        self.message_var.set("")
-
-
-class ChatFrame(ttk.Frame):
-    """Frame for chat interface with user list, thread selection, and conversation panels."""
-
-    def __init__(self, parent, controller):
-        super().__init__(parent)
-        self.controller = controller
-        self.logger = logging.getLogger(__name__)
-        self.threads = {}  # Dictionary to store chat history
-        self.current_thread = None
-        self.online_users = set()  # Set to store online users
-
-        # Configure main frame to expand
-        self.pack_propagate(False)
-        
-        # Create horizontal paned window for resizable split
-        self.paned = ttk.PanedWindow(self, orient="horizontal")
-        self.paned.pack(fill="both", expand=True)
-
-        # Left panel (User info, Thread Selection, Online Users)
-        left_frame = ttk.Frame(self.paned)
-        self.paned.add(left_frame, weight=1)
-
-        # Configure left frame grid
-        left_frame.grid_columnconfigure(0, weight=1)
-        left_frame.grid_rowconfigure(2, weight=1)  # Threads list gets more space
-        left_frame.grid_rowconfigure(4, weight=1)  # Users list gets space too
-
-        # User info and settings
-        user_frame = ttk.Frame(left_frame)
-        user_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
-        user_frame.grid_columnconfigure(0, weight=1)
-
-        # Username label
-        username_label = ttk.Label(
-            user_frame,
-            text="DEBUGTODO",
-            style='Title.TLabel'
-        )
-        username_label.grid(row=0, column=0, sticky="w", padx=5)
-
-        # Settings button with unicode character
-        settings_btn = ttk.Button(
-            user_frame,
-            text="⚙️",
-            width=3,
-            command=self.open_settings
-        )
-        settings_btn.grid(row=0, column=1, padx=5)
-
-        # Threads section
-        ttk.Label(
-            left_frame,
-            text="Conversations",
-            style='Title.TLabel'
-        ).grid(row=1, column=0, pady=(10,5), padx=5, sticky="w")
-
-        # Thread list with scrollbar
-        thread_frame = ttk.Frame(left_frame)
-        thread_frame.grid(row=2, column=0, sticky="nsew", padx=5)
-        thread_frame.grid_columnconfigure(0, weight=1)
-        thread_frame.grid_rowconfigure(0, weight=1)
-
-        self.thread_listbox = tk.Listbox(
-            thread_frame,
-            selectmode="single",
-            activestyle="none",
-            highlightthickness=1
-        )
-        self.thread_listbox.grid(row=0, column=0, sticky="nsew")
-        thread_scrollbar = ttk.Scrollbar(
-            thread_frame,
-            orient="vertical",
-            command=self.thread_listbox.yview
-        )
-        thread_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.thread_listbox.configure(yscrollcommand=thread_scrollbar.set)
-        self.thread_listbox.bind('<<ListboxSelect>>', self.on_thread_select)
-
-        # Search frame
-        search_frame = ttk.Frame(left_frame)
-        search_frame.grid(row=3, column=0, sticky="ew", padx=5, pady=10)
-        search_frame.grid_columnconfigure(0, weight=1)
-
-        self.search_var = tk.StringVar()
-        search_entry = ttk.Entry(search_frame, textvariable=self.search_var)
-        search_entry.grid(row=0, column=0, sticky="ew", padx=(0, 5))
-        search_entry.bind("<Return>", lambda e: self.start_thread())
-
-        search_button = ttk.Button(
-            search_frame, text="New Chat", command=self.start_thread
-        )
-        search_button.grid(row=0, column=1)
-
-        # Online Users section
-        ttk.Label(
-            left_frame,
-            text="Online Users",
-            style='Title.TLabel'
-        ).grid(row=4, column=0, pady=(10,5), padx=5, sticky="w")
-
-        # Online users list with scrollbar
-        users_frame = ttk.Frame(left_frame)
-        users_frame.grid(row=5, column=0, sticky="nsew", padx=5, pady=(0, 5))
-        users_frame.grid_columnconfigure(0, weight=1)
-        users_frame.grid_rowconfigure(0, weight=1)
-
-        self.users_listbox = tk.Listbox(
-            users_frame,
-            selectmode="single",
-            activestyle="none",
-            highlightthickness=1
-        )
-        self.users_listbox.grid(row=0, column=0, sticky="nsew")
-        users_scrollbar = ttk.Scrollbar(
-            users_frame,
-            orient="vertical",
-            command=self.users_listbox.yview
-        )
-        users_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.users_listbox.configure(yscrollcommand=users_scrollbar.set)
-        self.users_listbox.bind('<Double-Button-1>', self.start_thread_from_users)
-
-        # Right panel (Chat Area)
-        right_frame = ttk.Frame(self.paned)
-        self.paned.add(right_frame, weight=3)
-
-        # Configure right frame grid
-        right_frame.grid_columnconfigure(0, weight=1)
-        right_frame.grid_rowconfigure(1, weight=1)
-
-        # Chat header
-        self.header_var = tk.StringVar(value="Select a conversation")
-        self.header_label = ttk.Label(
-            right_frame,
-            textvariable=self.header_var,
-            style='Title.TLabel'
-        )
-        self.header_label.grid(row=0, column=0, pady=10, padx=5, sticky="w")
-
-        # Chat display with scrollbar
-        chat_frame = ttk.Frame(right_frame)
-        chat_frame.grid(row=1, column=0, sticky="nsew", padx=5)
-        chat_frame.grid_columnconfigure(0, weight=1)
-        chat_frame.grid_rowconfigure(0, weight=1)
-
-        self.chat_display = tk.Text(
-            chat_frame,
-            wrap="word",
-            state="disabled",
-            padx=5,
-            pady=5
-        )
-        self.chat_display.grid(row=0, column=0, sticky="nsew")
-        
-        chat_scrollbar = ttk.Scrollbar(
-            chat_frame,
-            orient="vertical",
-            command=self.chat_display.yview
-        )
-        chat_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.chat_display.configure(yscrollcommand=chat_scrollbar.set)
-
-        # Message entry
-        message_frame = ttk.Frame(right_frame)
-        message_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=10)
-        message_frame.grid_columnconfigure(0, weight=1)
-
-        self.message_var = tk.StringVar()
-        self.message_entry = ttk.Entry(
-            message_frame,
-            textvariable=self.message_var
-        )
-        self.message_entry.grid(row=0, column=0, sticky="ew", padx=(0, 5))
-        self.message_entry.bind("<Return>", lambda e: self.send_message())
-
-        send_button = ttk.Button(
-            message_frame,
-            text="Send",
-            command=self.send_message
-        )
-        send_button.grid(row=0, column=1)
-
-        # Request initial online users list
-        self.request_online_users()
-
-    def open_settings(self):
-        """Open the settings dialog"""
-        self.logger.debug("Opening settings dialog")
-        settings_dialog = SettingsDialog(self, self.controller)
-        settings_dialog.grab_set()  # Make dialog modal
-
-    def update_online_users(self, users_list):
-        """Update the online users listbox with new list of users"""
-        self.logger.debug(f"Updating online users list: {users_list}")
-        self.users_listbox.delete(0, tk.END)
-        self.online_users = set(users_list)
-        for user in sorted(users_list):
-            if user != self.controller.username:  # Don't show current user
-                self.users_listbox.insert(tk.END, user)
-
-    def request_online_users(self):
-        """Request the current list of online users from the server"""
-        self.logger.debug("Requesting online users list")
-        self.controller.client.send_request({
-            "command": "get_online_users",
-            "data": {}
-        })
-
-    def start_thread_from_users(self, event):
-        """Start a new chat thread from double-clicking a user in the online users list"""
-        selection = self.users_listbox.curselection()
-        if selection:
-            username = self.users_listbox.get(selection[0])
-            self.search_var.set(username)
-            self.start_thread()
-
-    def start_thread(self):
-        """Start a new conversation thread."""
-        username = self.search_var.get().strip()
-        if not username:
-            self.logger.warning("Attempted to start thread with empty username")
-            messagebox.showerror("Error", "Please enter a username")
-            return
-            
-        self.logger.info(f"Validating user: {username}")
-        self.controller.client.send_request({
-            "command": "validate_user",
-            "data": {"username": username}
-        })
-
-    def handle_user_validation(self, exists: bool, username: str):
-        """Handle the response from user validation."""
-        if exists:
-            self.logger.info(f"User {username} validated, starting thread")
-            if username not in self.threads:
-                self.threads[username] = []
-                self.thread_listbox.insert("end", username)
-            self.current_thread = username
-            self.header_var.set(f"Chat with {username}")
-            self.search_var.set("")
-            self.refresh_conversation_display()
-        else:
-            self.logger.warning(f"User {username} does not exist")
-            messagebox.showerror("Error", f"User '{username}' does not exist")
-
-    def on_thread_select(self, event):
-        """Handle thread selection from the listbox."""
-        selection = self.thread_listbox.curselection()
-        if selection:
-            username = self.thread_listbox.get(selection[0])
-            self.logger.debug(f"Selected thread: {username}")
-            self.current_thread = username
-            self.header_var.set(f"Chat with {username}")
-            self.refresh_conversation_display()
-
-    def refresh_conversation_display(self):
-        """Update the chat display with the current thread's messages."""
-        self.chat_display.configure(state="normal")
-        self.chat_display.delete(1.0, tk.END)
-        
-        if self.current_thread and self.current_thread in self.threads:
-            for message in self.threads[self.current_thread]:
-                self.chat_display.insert(tk.END, message + "\n")
-                
-        self.chat_display.configure(state="disabled")
-        self.chat_display.see(tk.END)
-
-    def handle_incoming_message(self, sender: str, text: str):
-        """Handle an incoming message from another user."""
-        self.logger.debug(f"Handling incoming message from {sender}: {text}")
-        self.add_message(sender, f"{sender}: {text}")
-
-    def add_message(self, thread: str, message: str):
-        """Add a message to a thread and update display if necessary."""
-        if thread not in self.threads:
-            self.threads[thread] = []
-            self.thread_listbox.insert("end", thread)
-        self.threads[thread].append(message)
-        if self.current_thread == thread:
-            self.refresh_conversation_display()
-
-    def send_message(self):
-        """Handle sending a message in the current thread."""
-        if not self.current_thread:
-            self.logger.warning("Attempted to send message without selecting thread")
-            messagebox.showerror("Error", "Please select a conversation first")
-            return
-            
-        message = self.message_var.get().strip()
-        if not message:
-            return
-            
-        self.logger.debug(f"Sending message to {self.current_thread}: {message}")
-        
-        # Add message to local thread history
-        self.add_message(self.current_thread, f"You: {message}")
-        
-        # Send message to server
-        self.controller.client.send_request({
-            "command": "send_message",
-            "data": {
-                "recipient": self.current_thread,
-                "message": message
-            }
-        })
-        
-        # Clear message entry
-        self.message_var.set("")
-
-
-class SettingsDialog(tk.Toplevel):
-    """Dialog window for user settings and preferences."""
-
-    def __init__(self, parent, controller):
-        super().__init__(parent)
-        self.controller = controller
-        self.logger = logging.getLogger(__name__)
-
-        # Configure dialog
-        self.title("Settings")
-        self.geometry("400x500")
-        self.minsize(300, 400)
-        self.resizable(False, False)
-
-        # Make dialog modal
-        self.transient(parent)
-        self.focus_set()
-
-        # Main container
-        main_frame = ttk.Frame(self, padding="10")
-        main_frame.pack(fill="both", expand=True)
-
-        # Notebook for different settings categories
-        notebook = ttk.Notebook(main_frame)
-        notebook.pack(fill="both", expand=True, pady=(0, 10))
-
-        # Account Settings
-        account_frame = ttk.Frame(notebook, padding="10")
-        notebook.add(account_frame, text="Account")
-
-        # Username (display only)
-        ttk.Label(account_frame, text="Username:").grid(row=0, column=0, sticky="w", pady=5)
-        ttk.Label(
-            account_frame,
-            text=controller.username,
-            style="Bold.TLabel"
-        ).grid(row=0, column=1, sticky="w", pady=5)
-
-        # Change Password
-        ttk.Label(account_frame, text="Current Password:").grid(
-            row=1, column=0, sticky="w", pady=5
-        )
-        self.current_password = ttk.Entry(account_frame, show="*")
-        self.current_password.grid(row=1, column=1, sticky="ew", pady=5)
-
-        ttk.Label(account_frame, text="New Password:").grid(
-            row=2, column=0, sticky="w", pady=5
-        )
-        self.new_password = ttk.Entry(account_frame, show="*")
-        self.new_password.grid(row=2, column=1, sticky="ew", pady=5)
-
-        ttk.Label(account_frame, text="Confirm Password:").grid(
-            row=3, column=0, sticky="w", pady=5
-        )
-        self.confirm_password = ttk.Entry(account_frame, show="*")
-        self.confirm_password.grid(row=3, column=1, sticky="ew", pady=5)
-
-        ttk.Button(
-            account_frame,
-            text="Change Password",
-            command=self.change_password
-        ).grid(row=4, column=0, columnspan=2, pady=20)
-
-        # Appearance Settings
-        appearance_frame = ttk.Frame(notebook, padding="10")
-        notebook.add(appearance_frame, text="Appearance")
-
-        # Theme selection
-        ttk.Label(appearance_frame, text="Theme:").grid(
-            row=0, column=0, sticky="w", pady=5
-        )
-        self.theme_var = tk.StringVar(value=self.controller.args.theme)
-        theme_combo = ttk.Combobox(
-            appearance_frame,
-            textvariable=self.theme_var,
-            values=["light", "dark"],
-            state="readonly"
-        )
-        theme_combo.grid(row=0, column=1, sticky="ew", pady=5)
-        theme_combo.bind("<<ComboboxSelected>>", self.change_theme)
-
-        # Notifications Settings
-        notifications_frame = ttk.Frame(notebook, padding="10")
-        notebook.add(notifications_frame, text="Notifications")
-
-        # Enable/disable notifications
-        self.notifications_enabled = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            notifications_frame,
-            text="Enable Notifications",
-            variable=self.notifications_enabled,
-            command=self.toggle_notifications
-        ).grid(row=0, column=0, sticky="w", pady=5)
-
-        # Sound notifications
-        self.sound_enabled = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            notifications_frame,
-            text="Enable Sound",
-            variable=self.sound_enabled,
-            command=self.toggle_sound
-        ).grid(row=1, column=0, sticky="w", pady=5)
-
-        # Close button
-        ttk.Button(
-            main_frame,
-            text="Close",
-            command=self.destroy
-        ).pack(side="right", pady=(0, 5))
-
-    def change_password(self):
-        """Handle password change request"""
-        current = self.current_password.get()
-        new = self.new_password.get()
-        confirm = self.confirm_password.get()
-
-        if not all([current, new, confirm]):
-            messagebox.showerror("Error", "All password fields are required")
-            return
-
-        if new != confirm:
-            messagebox.showerror("Error", "New passwords do not match")
-            return
-
-        self.logger.info("Attempting to change password")
-        self.controller.client.send_request({
-            "command": "change_password",
-            "data": {
-                "current_password": hashlib.sha256(current.encode()).hexdigest(),
-                "new_password": hashlib.sha256(new.encode()).hexdigest()
-            }
-        })
-
-    def change_theme(self, event=None):
-        """Handle theme change"""
-        theme = self.theme_var.get()
-        self.logger.info(f"Changing theme to: {theme}")
         try:
-            self.controller.tk.call("set_theme", theme)
-        except tk.TclError as e:
-            self.logger.error(f"Failed to change theme: {e}")
-            messagebox.showerror("Error", "Failed to change theme")
+            self.client.create_account(username, password)
+            logging.info("account '%s' created successfully", username)
+            messagebox.showinfo("success", "account created, please login")
+        except Exception as e:
+            logging.error("signup error for username '%s': %s", username, e)
+            messagebox.showerror("signup error", str(e))
+            return
+        self.signup_frame.destroy()
+        self._create_login_frame()
 
-    def toggle_notifications(self):
-        """Handle notifications toggle"""
-        enabled = self.notifications_enabled.get()
-        self.logger.info(f"Notifications {'enabled' if enabled else 'disabled'}")
-        # Implement notification settings
+    def _switch_to_signup(self) -> None:
+        logging.debug("switching to signup screen")
+        self.login_frame.destroy()
+        self._create_signup_frame()
 
-    def toggle_sound(self):
-        """Handle sound toggle"""
-        enabled = self.sound_enabled.get()
-        self.logger.info(f"Sound {'enabled' if enabled else 'disabled'}")
-        # Implement sound settings
+    def _switch_to_login(self) -> None:
+        logging.debug("switching to login screen")
+        self.signup_frame.destroy()
+        self._create_login_frame()
 
-def main():
-    """Main entry point for the application."""
-    # Parse command line arguments
-    args = parse_arguments()
-    
-    # Setup logging
-    setup_logging(args.verbose, args.log_file)
-    logger = logging.getLogger(__name__)
-    
-    logger.info("Starting Chat Client Application")
-    logger.debug(f"Arguments: {args}")
-    
-    # Create and run the application
-    app = ChatClientGUI(args)
-    
-    # Try to set the theme if specified
-    if args.theme:
+    # ---------- main chat screen -----------
+    def _create_chat_frame(self) -> None:
+        logging.debug("creating main chat frame")
+        frame = tk.Frame(self)
+        frame.pack(expand=True, fill="both")
+        self.chat_frame = frame
+
+        settings_btn = tk.Button(frame, text="settings", command=self.open_settings)
+        settings_btn.pack(anchor="ne", padx=5, pady=5)
+
+        paned = tk.PanedWindow(frame, orient=tk.HORIZONTAL)
+        paned.pack(expand=True, fill="both")
+
+        accounts_frame = tk.Frame(paned, width=200)
+        paned.add(accounts_frame)
+
+        search_lbl = tk.Label(accounts_frame, text="search:")
+        search_lbl.pack(anchor="nw", padx=5, pady=(0, 0))
+        self.account_search_entry = tk.Entry(accounts_frame)
+        self.account_search_entry.pack(fill="x", padx=5, pady=(0, 5))
+        self.account_search_entry.bind("<Return>", self.on_account_search)
+        self.account_search_entry.bind(
+            "<Control-a>",
+            lambda x: self.account_search_entry.selection_range(0, "end") or "break",
+        )
+
+        self.accounts_listbox = tk.Listbox(accounts_frame)
+        self.accounts_listbox.pack(expand=True, fill="both", padx=5)
+        self.accounts_listbox.bind("<<ListboxSelect>>", self.on_account_select)
+
+        acct_pag_frame = tk.Frame(accounts_frame)
+        acct_pag_frame.pack(fill="x", padx=5, pady=5)
+        prev_acct_btn = tk.Button(acct_pag_frame, text="prev", command=self.prev_accounts_page)
+        prev_acct_btn.pack(side="left", expand=True, fill="x")
+        next_acct_btn = tk.Button(acct_pag_frame, text="next", command=self.next_accounts_page)
+        next_acct_btn.pack(side="left", expand=True, fill="x")
+
+        # right column: messages area using a scrollable canvas and a frame container
+        messages_frame = tk.Frame(paned)
+        paned.add(messages_frame)
+
+        self.messages_canvas = tk.Canvas(messages_frame)
+        self.messages_canvas.pack(side="left", fill="both", expand=True)
+
+        self.messages_scroll = tk.Scrollbar(
+            messages_frame, orient="vertical", command=self.messages_canvas.yview
+        )
+        self.messages_scroll.pack(side="right", fill="y")
+        self.messages_canvas.configure(yscrollcommand=self.messages_scroll.set)
+
+        self.messages_container = tk.Frame(self.messages_canvas)
+        self.messages_container.bind(
+            "<Configure>",
+            lambda e: self.messages_canvas.configure(
+                scrollregion=self.messages_canvas.bbox("all")
+            ),
+        )
+        self.messages_canvas.create_window((0, 0), window=self.messages_container, anchor="nw")
+
+        # pagination controls for messages
+        msg_pag_frame = tk.Frame(frame)
+        msg_pag_frame.pack(fill="x", padx=5, pady=5)
+        prev_msg_btn = tk.Button(msg_pag_frame, text="prev", command=self.prev_messages_page)
+        prev_msg_btn.pack(side="left", expand=True, fill="x")
+        next_msg_btn = tk.Button(msg_pag_frame, text="next", command=self.next_messages_page)
+        next_msg_btn.pack(side="left", expand=True, fill="x")
+
+        # message input area at the bottom
+        input_frame = tk.Frame(frame)
+        input_frame.pack(fill="x", padx=5, pady=5)
+
+        to_label = tk.Label(input_frame, text="To:", fg="gray40")
+        to_label.pack(side="left", padx=(5, 2))
+
+        self.selected_user_label = tk.Label(input_frame, text="No receiver selected", fg="red")
+        self.selected_user_label.pack(side="left", padx=(0, 5))
+
+        self.message_entry = tk.Entry(input_frame)
+        self.message_entry.pack(side="left", expand=True, fill="x", padx=5)
+        self.message_entry.bind("<Return>", self.send_message)
+        self.message_entry.bind(
+            "<Control-a>",
+            lambda x: self.message_entry.selection_range(0, "end") or "break",
+        )
+        send_btn = tk.Button(input_frame, text="send", command=self.send_message)
+        send_btn.pack(side="left", padx=5)
+
+        logging.debug("main chat frame created; loading accounts and messages")
+        self.update_accounts_list()
         try:
-            theme_file = Path(__file__).parent / f"{args.theme}.tcl"
-            if theme_file.exists():
-                logger.info(f"Loading theme: {args.theme}")
-                app.tk.call("source", str(theme_file))
-                app.tk.call("set_theme", args.theme)
-            else:
-                logger.warning(f"Theme file not found: {theme_file}")
-        except tk.TclError as e:
-            logger.error(f"Failed to load theme: {e}")
-    
-    try:
-        app.mainloop()
-    except Exception as e:
-        logger.error(f"Unexpected error: {e}", exc_info=True)
-        raise
-    finally:
-        logger.info("Application shutting down")
+            # initial full fetch to cache messages
+            self.message_cache = self.client.read_messages(0, 10000)
+        except Exception as e:
+            logging.error("failed to load initial messages: %s", e)
+            messagebox.showerror("error", f"failed to load messages: {e}")
+            self.message_cache = []
+        self.update_messages_area()
+
+    def on_account_search(self, event: tk.Event) -> None:
+        logging.debug("account search triggered")
+        self.account_offset = 0
+        query = self.account_search_entry.get().strip()
+        if not query:
+            query = "*"
+        self.update_accounts_list(query)
+
+    def update_accounts_list(self, pattern: str = "*") -> None:
+        logging.debug("updating accounts list with pattern '%s'", pattern)
+        try:
+            accounts = self.client.list_accounts(
+                pattern, self.account_offset, self.account_page_size
+            )
+        except Exception as e:
+            logging.error("failed to load accounts: %s", e)
+            messagebox.showerror("error", f"failed to load accounts: {e}")
+            return
+        self.accounts_listbox.delete(0, tk.END)
+        for acct in accounts:
+            self.accounts_listbox.insert(tk.END, acct)
+
+    def prev_accounts_page(self) -> None:
+        if self.account_offset >= self.account_page_size:
+            self.account_offset -= self.account_page_size
+            query = self.account_search_entry.get().strip() or "*"
+            logging.debug("navigating to previous accounts page, new offset %d", self.account_offset)
+            self.update_accounts_list(query)
+
+    def next_accounts_page(self) -> None:
+        self.account_offset += self.account_page_size
+        query = self.account_search_entry.get().strip() or "*"
+        logging.debug("navigating to next accounts page, new offset %d", self.account_offset)
+        self.update_accounts_list(query)
+
+    def on_account_select(self, event: tk.Event) -> None:
+        selection = self.accounts_listbox.curselection()
+        if selection:
+            self.selected_account = self.accounts_listbox.get(selection[0])
+            logging.debug("selected conversation with account: %s", self.selected_account)
+            color = self.get_user_color(self.selected_account)
+            self.selected_user_label.config(text=self.selected_account, fg=color)
+            self.message_offset = 0
+            self.update_messages_area()
+        else:
+            self.selected_account = None
+
+    def update_messages_area(self) -> None:
+        for widget in self.messages_container.winfo_children():
+            widget.destroy()
+        if self.selected_account:
+            filtered = [
+                msg for msg in self.message_cache
+                if msg.get("from") == self.selected_account or msg.get("to") == self.selected_account
+            ]
+            messages = filtered[self.message_offset:self.message_offset + self.message_page_size]
+        else:
+            messages = self.message_cache[self.message_offset:self.message_offset + self.message_page_size]
+        for msg in messages:
+            color = self.get_user_color(msg.get("from", "unknown"))
+            ml = message_line(self.messages_container, msg, self.delete_message, user_color=color)
+            ml.pack(fill="x", pady=2, padx=2)
+        self.messages_container.update_idletasks()
+        self.messages_canvas.configure(
+            scrollregion=self.messages_canvas.bbox("all")
+        )
+        logging.debug(
+            "messages area updated; offset %d, count %d",
+            self.message_offset,
+            self.message_page_size,
+        )
+
+    def on_new_message(self, msg) -> None:
+        # append new message to the cache if not already present
+        if not any(m["id"] == msg["id"] for m in self.message_cache):
+            self.message_cache.append(msg)
+            self.update_messages_area()
+
+    def prev_messages_page(self) -> None:
+        if self.message_offset >= self.message_page_size:
+            self.message_offset -= self.message_page_size
+            logging.debug("navigating to previous messages page, new offset %d", self.message_offset)
+            self.update_messages_area()
+
+    def next_messages_page(self) -> None:
+        self.message_offset += self.message_page_size
+        logging.debug("navigating to next messages page, new offset %d", self.message_offset)
+        self.update_messages_area()
+
+    def send_message(self, event: Optional[tk.Event] = None) -> None:
+        content = self.message_entry.get().strip()
+        logging.debug("attempting to send message: %s", content)
+        if not self.selected_account:
+            logging.error("no recipient selected when trying to send message")
+            messagebox.showerror("error", "no recipient selected")
+            return
+        if not content:
+            return
+        try:
+            self.client.send_message(self.selected_account, content)
+            logging.info("message sent to '%s'", self.selected_account)
+            new_id = max((msg["id"] for msg in self.message_cache), default=0) + 1
+            new_msg = {
+                "id": new_id,
+                "from": self.current_user,
+                "to": self.selected_account,
+                "timestamp": int(datetime.now().strftime("%s")),
+                "content": content,
+            }
+            if not any(m["id"] == new_msg["id"] for m in self.message_cache):
+                self.message_cache.append(new_msg)
+        except Exception as e:
+            logging.error("failed to send message: %s", e)
+            messagebox.showerror("error", f"failed to send message: {e}")
+            return
+        self.message_entry.delete(0, tk.END)
+        self.update_messages_area()
+
+    def delete_message(self, message_id: int) -> None:
+        logging.info("attempting to delete message with id %d", message_id)
+        try:
+            self.client.delete_message(message_id)
+            self.message_cache = [msg for msg in self.message_cache if msg["id"] != message_id]
+        except Exception as e:
+            logging.error("failed to delete message: %s", e)
+            messagebox.showerror("error", f"failed to delete message: {e}")
+            return
+        self.update_messages_area()
+
+    def open_settings(self) -> None:
+        logging.debug("opening settings window")
+        settings_win = tk.Toplevel(self)
+        settings_win.title("settings")
+        settings_win.geometry("300x200")
+
+        lbl = tk.Label(settings_win, text="messages per page:")
+        lbl.pack(pady=10)
+        per_page_entry = tk.Entry(settings_win)
+        per_page_entry.insert(0, str(self.message_page_size))
+        per_page_entry.pack(pady=5)
+
+        delete_btn = tk.Button(
+            settings_win, text="delete account", command=self.delete_account
+        )
+        delete_btn.pack(pady=5)
+
+        def save_settings() -> None:
+            try:
+                new_val = int(per_page_entry.get().strip())
+                if new_val <= 0:
+                    raise ValueError
+                self.message_page_size = new_val
+                settings_win.destroy()
+                self.message_offset = 0
+                self.update_messages_area()
+                logging.info("settings updated: message_page_size set to %d", new_val)
+            except ValueError:
+                logging.error("invalid value entered for messages per page")
+                messagebox.showerror("error", "enter a valid positive number")
+
+        save_btn = tk.Button(settings_win, text="save", command=save_settings)
+        save_btn.pack(pady=10)
+
+    def delete_account(self) -> None:
+        logging.info("deleting account '%s'", self.current_user)
+        try:
+            self.client.delete_account(self.current_user)
+        except Exception as e:
+            logging.error("failed to delete account: %s", e)
+            messagebox.showerror("error", f"failed to delete account: {e}")
+            return
+        messagebox.showinfo("account deleted", "your account has been deleted")
+        self.chat_frame.destroy()
+        self._create_login_frame()
+
+    def get_user_color(self, username: str) -> str:
+        if username not in self.user_color_map:
+            idx = len(self.user_color_map) % len(USER_COLORS)
+            self.user_color_map[username] = USER_COLORS[idx]
+        return self.user_color_map[username]
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="irc/gmail hybrid chat application"
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="enable verbose logging (default shows errors only)",
+    )
+    args = parser.parse_args()
+
+    log_level = logging.DEBUG if args.verbose else logging.ERROR
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    logging.info("starting chat application")
+    app = chatapp(JSONClient, "localhost", 12345)
+    app.mainloop()
+    logging.info("chat application closed")
+
