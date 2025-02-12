@@ -80,33 +80,37 @@ def encode_conversation_data(data: dict) -> bytes:
          "remaining": int
       }
 
-    Binary format:
-      - conversation_with: length (H) followed by bytes
+    desired binary format for conversation data:
+      - flag (B) [1]
+      - conversation_with: length (H) + conversation_with bytes
       - page_num: unsigned short (H)
       - page_size: unsigned short (H)
       - total_msgs: unsigned int (I)
       - remaining: unsigned int (I)
       - message_count: unsigned short (H)
-      - For each message:
+      - for each message:
             - id: unsigned int (I)
             - content: length (H) + content bytes
-            - read flag: 1 byte (B, 1 for True, 0 for False)
+            - read flag: 1 byte (B)
     """
-    total_unread = data.get("total_unread", 0)
-    remaining_unread = data.get("remaining_unread", 0)
-    messages = data.get("read_messages", [])
-    result = struct.pack("!B", 0)  # 0 signals general read response
-    result += struct.pack("!II", total_unread, remaining_unread)
+    conv_with = data.get("conversation_with", "")
+    conv_bytes = conv_with.encode("utf-8")
+    page_num = data.get("page_num", 0)
+    page_size = data.get("page_size", 0)
+    total_msgs = data.get("total_msgs", 0)
+    remaining = data.get("remaining", 0)
+    messages = data.get("messages", [])
+    result = struct.pack("!B", 1)  # flag = 1 signals conversation response
+    result += struct.pack("!H", len(conv_bytes)) + conv_bytes
+    result += struct.pack("!HH", page_num, page_size)
+    result += struct.pack("!II", total_msgs, remaining)
     result += struct.pack("!H", len(messages))
     for msg in messages:
         msg_id = msg.get("id", 0)
-        sender = msg.get("sender", "")
-        sender_bytes = sender.encode("utf-8")
         content = msg.get("content", "")
         content_bytes = content.encode("utf-8")
         read_flag = 1 if msg.get("read", False) else 0
         result += struct.pack("!I", msg_id)
-        result += struct.pack("!H", len(sender_bytes)) + sender_bytes
         result += struct.pack("!H", len(content_bytes)) + content_bytes
         result += struct.pack("!B", read_flag)
     return result
@@ -125,6 +129,7 @@ def encode_unread_data(data: dict) -> bytes:
       }
       
     Binary format:
+      - flag indicating read type (all vs partner): 1 byte (B)
       - total_unread: unsigned int (I)
       - remaining_unread: unsigned int (I)
       - message_count: unsigned short (H)
@@ -137,9 +142,10 @@ def encode_unread_data(data: dict) -> bytes:
     total_unread = data.get("total_unread", 0)
     remaining_unread = data.get("remaining_unread", 0)
     messages = data.get("read_messages", [])
-    result = struct.pack("!II", total_unread, remaining_unread)
+    result = struct.pack("!BII", 0, total_unread, remaining_unread)
     result += struct.pack("!H", len(messages))
     for msg in messages:
+        logging.debug(f"Encoding message: {msg}")
         msg_id = msg.get("id", 0)
         sender = msg.get("sender", "")
         sender_bytes = sender.encode("utf-8")
@@ -325,8 +331,6 @@ def decode_message_from_buffer(buffer: bytes):
             partner_bytes = buffer[pos:pos+partner_len]
             pos += partner_len
             req["chat_partner"] = partner_bytes.decode("utf-8")
-        else:
-            req["chat_partner"] = ""
         return req, pos
 
     elif op_code == OP_CODES_DICT["DELETE_MESSAGE"]:
@@ -538,17 +542,13 @@ class ChatServer:
         
         Otherwise, data is encoded as JSON (fallback).
         """
-        op_name = ""
         if data is not None:
             if "total_accounts" in data and "accounts" in data:
                 data_bytes = encode_list_accounts_data(data)
-                op_name = "LIST_ACCOUNTS"
             elif "conversation_with" in data and "messages" in data:
                 data_bytes = encode_conversation_data(data)
-                op_name = "READ_PARTNER"
             elif "read_messages" in data and "total_unread" in data:
                 data_bytes = encode_unread_data(data)
-                op_name = "READ_GENERAL"
             else:
                 logging.error("Something went wrong. Fallback: encoding data as JSON.")
                 data_bytes = json.dumps(data).encode("utf-8")
@@ -803,7 +803,8 @@ class ChatServer:
         page_size = request.get("page_size", 5)
         page_num = request.get("page_num", 1)
 
-        if chat_partner:
+        if chat_partner is not None:
+            logging.debug(f"Fetching all messages for user {username} with {chat_partner}")
             conversations = accounts[username].get("conversations", {})
             partner_msgs = conversations.get(chat_partner, [])
             total_msgs = len(partner_msgs)
@@ -832,6 +833,7 @@ class ChatServer:
                 f"user '{username}' read conversation with '{chat_partner}'"
             )
         else:
+            logging.debug(f"Fetching all messages for user {username}")
             user_msgs = accounts[username]["messages"]
             unread_msgs = [m for m in user_msgs if not m["read"]]
             total_unread = len(unread_msgs)
@@ -854,6 +856,7 @@ class ChatServer:
                 "total_unread": total_unread,
                 "remaining_unread": max(0, total_unread - end_index),
             }
+            logging.debug(f"Data to be sent over the wire: {data}")
             self.send_response(
                 client_state, success=True, data=data, req_opcode=req_opcode
             )

@@ -418,7 +418,8 @@ class CustomProtocolClient:
                       ) -> List[Dict[str, Any]]:
         page_num = (offset // count) + 1
         payload = {"action": "READ_MESSAGES", "page_size": count, "page_num": page_num}
-        payload["chat_partner"] = to_user if to_user else ''
+        if to_user:
+            payload["chat_partner"] = to_user
         response = self._send_request(payload)
         if not response.get("success", False):
             raise Exception(response.get("message", "Failed to read messages"))
