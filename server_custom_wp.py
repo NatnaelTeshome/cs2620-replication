@@ -4,6 +4,7 @@ import json
 import hashlib
 import logging
 import struct
+import fnmatch
 
 logging.basicConfig(level=logging.DEBUG, format='[%(asctime)s] [%(levelname)s] %(message)s')
 
@@ -33,7 +34,7 @@ OP_CODES_DICT = {
     "QUIT": 9
 }
 
-# --- New Helper Functions for Binarizing Data ---
+# --- Helper Functions for Binarizing Data ---
 
 def encode_list_accounts_data(data: dict) -> bytes:
     """
@@ -438,14 +439,18 @@ class ChatServer:
         try:
             data = client_state.sock.recv(1024)
             logging.debug(f"received data from {client_state.addr}: {len(data)} bytes")
+            print(f"the data is {data}")
         except Exception as e:
             logging.error(f"error reading from {client_state.addr}: {e}")
             data = None
 
+        print(data)
         if data:
+            print("if works")
             client_state.in_buffer += data
             try:
                 while True:
+                    print("while loop works")
                     req, consumed = decode_message_from_buffer(client_state.in_buffer)
                     if req is None or consumed == 0:
                         break
@@ -659,7 +664,7 @@ class ChatServer:
             self.send_response(
                 client_state,
                 success=False,
-                message="please log in first.",
+                message="Please log in first.",
                 req_opcode=req_opcode,
             )
             logging.warning(
@@ -669,13 +674,20 @@ class ChatServer:
 
         page_size = request.get("page_size", 10)
         page_num = request.get("page_num", 1)
-        pattern = request.get("pattern", "*")
-        all_accounts = sorted(accounts.keys())
-        total_accounts = len(all_accounts)
+        pattern = request.get("pattern", "*") # By default, show all accounts
+
+        # Use fnmatch to filter accounts that match the wildcard pattern
+        matching_accounts = [
+            account for account in accounts.keys() if fnmatch.fnmatch(account, pattern)
+        ]
+        matching_accounts.sort()
+        total_accounts = len(matching_accounts)
+
         start_index = (page_num - 1) * page_size
         end_index = start_index + page_size
+
         page_accounts = (
-            all_accounts[start_index:end_index] if start_index < total_accounts else []
+            matching_accounts[start_index:end_index] if start_index < total_accounts else []
         )
         data = {"total_accounts": total_accounts, "accounts": page_accounts}
         self.send_response(

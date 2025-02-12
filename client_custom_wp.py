@@ -20,12 +20,6 @@ OP_CODES_DICT = {
     "QUIT": 9
 }
 
-OP_CODES_SEND_RESPONSE_DICT = {
-    "LIST_ACCOUNTS": 0,
-    "READ_PARTNER": 1,
-    "READ_GENERAL": 2
-}
-
 def encode_login(payload) -> bytes:
     op_code = OP_CODES_DICT["LOGIN"]
     username = payload.get("username")
