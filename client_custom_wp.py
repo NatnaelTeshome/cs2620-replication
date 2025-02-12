@@ -226,6 +226,11 @@ def decode_data_bytes(data_bytes: bytes, opcode=None) -> any:
                                  "read": bool(read_flag)})
             return {"total_unread": total_unread, "remaining_unread": remaining_unread,
                     "read_messages": messages}
+    elif opcode == OP_CODES_DICT["SEND_MESSAGE"]:
+        if len(data_bytes) < 4:
+            raise ValueError("insufficient data for message id")
+        msg_id = struct.unpack("!I", data_bytes[:4])[0]
+        return {"id": msg_id}
     else:
         # fallback to json decode.
         return json.loads(data_bytes.decode("utf-8"))
@@ -413,14 +418,16 @@ class CustomProtocolClient:
         accounts_data = response.get("data", {})
         return accounts_data.get("accounts", [])
 
-    def send_message(self, recipient: str, message: str) -> None:
+    def send_message(self, recipient: str, message: str) -> int:
         if not self.username:
             raise Exception("not logged in")
         payload = {"action": "SEND_MESSAGE", "to": recipient, "message": message}
         response = self._send_request(payload)
         if not response.get("success", False):
             raise Exception(response.get("message", "Failed to send message"))
-        print("Message sent!")
+        id = response.get("data", {}).get("id", -1)
+        print(f"Message sent! Got ID: {id}")
+        return id
 
     def read_messages(self, offset: int = 0, count: int = 10, to_user: Optional[str] = None
                       ) -> List[Dict[str, Any]]:

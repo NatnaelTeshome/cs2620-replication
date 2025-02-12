@@ -642,7 +642,7 @@ class chatapp(tk.Tk):
     def on_delete_request(self, data) -> None:
         # remove messages with matching ids from cache
         logging.debug("Cache before: %s", str(self.message_cache))
-        self.message_cache = [m for m in self.message_cache if m["id"] not in data.get("ids", [])]
+        self.message_cache = [m for m in self.message_cache if m["id"] not in data.get("message_ids", [])]
         logging.debug("Cache after: %s", str(self.message_cache))
         self.update_messages_area()
 

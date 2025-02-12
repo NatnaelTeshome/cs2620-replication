@@ -14,11 +14,10 @@ with open("config.json", "r") as file:
     try:
         config = json.load(file)
     except Exception as e:
-        print(e)
         logging.error(f"failed to load config: {e}")
         config = {}
 
-HOST = config.get("HOST", "localhost")
+HOST = config.get("HOST", str(socket.gethostbyname(socket.gethostname())))
 PORT = config.get("PORT", 12345)
 
 # --- Persistent storage using shelve ---
@@ -420,6 +419,8 @@ class ChatServer:
                 data_bytes = encode_conversation_data(data)
             elif "read_messages" in data and "total_unread" in data:
                 data_bytes = encode_unread_data(data)
+            elif set(data.keys()) == {"id"}:
+                data_bytes = struct.pack("!I", data["id"])
             else:
                 logging.error("Something went wrong. Fallback: encoding data as JSON.")
                 data_bytes = json.dumps(data).encode("utf-8")
@@ -601,7 +602,9 @@ class ChatServer:
         id_to_message[msg_id] = new_msg
 
         # Acknowledge to the sender
-        self.send_response(client_state, success=True, req_opcode=req_opcode)
+        self.send_response(client_state, success=True,
+                           data={"id": msg_id},
+                           req_opcode=req_opcode)
         logging.info(f"user '{sender}' sent message id {msg_id} to '{recipient}'")
 
         # If recipient is logged in, push a notification to them
