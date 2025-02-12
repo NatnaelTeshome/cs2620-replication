@@ -260,7 +260,8 @@ class chatapp(tk.Tk):
         super().__init__()
         self.title("(c)hatsystem2620")
         self.geometry("800x600")
-        self.client: client = client(host, port)
+        # Register a client w/ a callback
+        self.client: client = client(host, port, self.on_new_message)
         self.current_user: Optional[str] = None
         self.selected_account: Optional[str] = None
 
@@ -623,6 +624,13 @@ class chatapp(tk.Tk):
             self.message_offset,
             self.message_page_size,
         )
+
+    def on_new_message(self, msg) -> None:
+        """Append to locally stored copy of messages"""
+        # TODO: Implement
+        self.update_message_area()
+        pass
+
 
     def prev_messages_page(self) -> None:
         if self.message_offset >= self.message_page_size:
