@@ -7,8 +7,6 @@ import threading
 import time
 import hashlib
 
-# Import everything from your module.
-# (Adjust the module name if necessary.)
 from client_custom_wp import (
     VERSION,
     OP_CODES_DICT,

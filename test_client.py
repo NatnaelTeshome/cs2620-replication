@@ -6,15 +6,8 @@ import pytest
 import hashlib
 from datetime import datetime
 import socket
-
-# Import the classes from your client module.
-# (Replace "client" with the actual module name if needed.)
 import client
 from client import JSONClient, MockClient
-
-#####################################
-# Fake socket classes for testing   #
-#####################################
 
 class FakeSocket:
     """A fake socket that doesn’t actually perform network I/O."""
@@ -42,10 +35,6 @@ class FakeSocketForClose:
     def close(self):
         self.closed = True
 
-##############################################
-# Fixtures: override socket and datetime     #
-##############################################
-
 @pytest.fixture
 def json_client(monkeypatch):
     """
@@ -59,11 +48,6 @@ def json_client(monkeypatch):
     # Override the listener thread so it doesn’t interfere.
     monkeypatch.setattr(client_obj, "_listen", lambda: None)
     return client_obj
-
-
-###############################
-# Tests for JSONClient        #
-###############################
 
 def test_hash_password(json_client):
     hashed = json_client._hash_password("password")

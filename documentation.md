@@ -81,10 +81,12 @@ Each operation is identified by its `"action"` key (case-insensitive) and includ
   
 - **DELETE_MESSAGE:**  
   Deletes one or more messages specified by a list of message IDs.
+  To delete a message, the user hovers on the message and clicks a delete button. Then, it gets deleted for both the user and the recepient. 
   
 - **DELETE_ACCOUNT:**  
   Deletes the currently logged-in account. TODO: The semantics for handling unread messages are defined within the implementation.
-  
+  When account is deleted, the unread messages are displayed to the receipient. We made this decision after taking inspiration from popular chat apps like Telegram.
+
 - **LOGOUT:**  
   Logs out the current user session.
   
