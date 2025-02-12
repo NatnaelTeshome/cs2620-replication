@@ -144,8 +144,6 @@ class client:
 
     def list_accounts(self, pattern: str = "*", offset: int = 0, limit: int = 10) -> List[str]:
         accounts = list(self.accounts.keys())
-        if pattern != "*" and pattern:
-            accounts = [acct for acct in accounts if pattern in acct]
         result = accounts[offset : offset + limit]
         logging.debug(
             "list_accounts with pattern '%s', offset %d, limit %d: %s",
