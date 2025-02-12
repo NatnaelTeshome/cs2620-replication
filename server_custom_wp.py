@@ -32,18 +32,6 @@ OP_CODES_DICT = {
     "CHECK_USERNAME": 8,
     "QUIT": 9
 }
-REVERSED_OP_CODES_DICT = {v: k for k, v in OP_CODES_DICT.items()}
-
-OP_CODES_SEND_RESPONSE_DICT = {
-    "LIST_ACCOUNTS": 0,
-    "READ_PARTNER": 1,
-    "READ_GENERAL": 2
-}
-
-
-
-import struct
-import json
 
 # --- New Helper Functions for Binarizing Data ---
 
@@ -70,10 +58,11 @@ def encode_list_accounts_data(data: dict) -> bytes:
         encoded += struct.pack("!H", len(acct_bytes)) + acct_bytes
     return encoded
 
+
 def encode_conversation_data(data: dict) -> bytes:
     """
     Encode conversation read data (when a chat partner is specified).
-    
+
     Expected data structure:
       {
          "conversation_with": str,
@@ -84,7 +73,7 @@ def encode_conversation_data(data: dict) -> bytes:
          "total_msgs": int,
          "remaining": int
       }
-      
+
     Binary format:
       - conversation_with: length (H) followed by bytes
       - page_num: unsigned short (H)
@@ -97,25 +86,25 @@ def encode_conversation_data(data: dict) -> bytes:
             - content: length (H) + content bytes
             - read flag: 1 byte (B, 1 for True, 0 for False)
     """
-    conv_with = data.get("conversation_with", "")
-    conv_with_bytes = conv_with.encode("utf-8")
-    result = struct.pack("!H", len(conv_with_bytes)) + conv_with_bytes
-    page_num = data.get("page_num", 0)
-    page_size = data.get("page_size", 0)
-    total_msgs = data.get("total_msgs", 0)
-    remaining = data.get("remaining", 0)
-    result += struct.pack("!HHII", page_num, page_size, total_msgs, remaining)
-    messages = data.get("messages", [])
+    total_unread = data.get("total_unread", 0)
+    remaining_unread = data.get("remaining_unread", 0)
+    messages = data.get("read_messages", [])
+    result = struct.pack("!B", 0)  # 0 signals general read response
+    result += struct.pack("!II", total_unread, remaining_unread)
     result += struct.pack("!H", len(messages))
     for msg in messages:
         msg_id = msg.get("id", 0)
+        sender = msg.get("sender", "")
+        sender_bytes = sender.encode("utf-8")
         content = msg.get("content", "")
         content_bytes = content.encode("utf-8")
         read_flag = 1 if msg.get("read", False) else 0
-        result += struct.pack("!I H", msg_id, len(content_bytes))
-        result += content_bytes
+        result += struct.pack("!I", msg_id)
+        result += struct.pack("!H", len(sender_bytes)) + sender_bytes
+        result += struct.pack("!H", len(content_bytes)) + content_bytes
         result += struct.pack("!B", read_flag)
     return result
+
 
 def encode_unread_data(data: dict) -> bytes:
     """
@@ -157,27 +146,32 @@ def encode_unread_data(data: dict) -> bytes:
         result += struct.pack("!B", read_flag)
     return result
 
-def encode_response_bin(success: bool, message: str = "", data_bytes: bytes = b"", op_name: str = "") -> bytes:
+def encode_response_bin(success: bool, message: str = "",
+                        data_bytes: bytes = b"", op_code: int = 0) -> bytes:
     """
     Encode a response in binary format.
-    
+
     Payload structure:
        - success flag: 1 byte (B) (1 for True, 0 for False)
        - message: unsigned short (H) for length + message bytes (UTF-8)
        - data: unsigned short (H) for length + data bytes (if any)
-       
+
     Header structure:
        - version: 1 byte (B)
-       - opcode: 1 byte (B) [we use 0 for responses]
+       - opcode: 1 byte (B) [we use 0 for event responses]
        - payload length: 2 bytes (H)
     """
     success_byte = 1 if success else 0
     message_bytes = message.encode("utf-8") if message else b""
-    payload = struct.pack(f"!B H {len(message_bytes)}s H", success_byte, len(message_bytes), message_bytes, len(data_bytes))
+    payload = struct.pack(f"!B H {len(message_bytes)}s H",
+                          success_byte,
+                          len(message_bytes),
+                          message_bytes,
+                          len(data_bytes))
     payload += data_bytes
-    op_code = OP_CODES_SEND_RESPONSE_DICT[op_name]
     header = struct.pack("!BBH", VERSION, op_code, len(payload))
     return header + payload
+
 
 def get_unread_count(username):
     """
@@ -222,6 +216,9 @@ def decode_message_from_buffer(buffer: bytes):
     version, op_code = struct.unpack("!BB", buffer[:2])
     if version != VERSION:
         raise ValueError("Unsupported protocol version")
+    # Request dict
+    req = {"opcode": op_code}
+
     # LOGIN and CREATE_ACCOUNT: !BBH{username}sH{password_hash}s
     if op_code in (OP_CODES_DICT["LOGIN"], OP_CODES_DICT["CREATE_ACCOUNT"]):
         if len(buffer) < 4:
@@ -236,7 +233,6 @@ def decode_message_from_buffer(buffer: bytes):
             return None, 0
         password_bytes = buffer[pos+2: pos+2+password_len]
         total_consumed = pos + 2 + password_len
-        req = {}
         req["action"] = "LOGIN" if op_code == OP_CODES_DICT["LOGIN"] else "CREATE_ACCOUNT"
         req["username"] = username_bytes.decode("utf-8")
         req["password_hash"] = password_bytes.decode("utf-8")
@@ -244,16 +240,28 @@ def decode_message_from_buffer(buffer: bytes):
 
     elif op_code == OP_CODES_DICT["DELETE_ACCOUNT"]:
         # Format: !BB
-        return {"action": "DELETE_ACCOUNT"}, 2
+        req["action"] = "DELETE_ACCOUNT"
+        return req, 2
 
     elif op_code == OP_CODES_DICT["LIST_ACCOUNTS"]:
-        # Format: !BBHH
-        if len(buffer) < 6:
+        # expected format: !BBHHH{pattern_len}s
+        # fields: version (B), op_code (B), page_size (H), page_num (H),
+        #         pattern_len (H), pattern_bytes (pattern_len bytes)
+        header_size = 1 + 1 + 2 + 2 + 2  # = 8 bytes
+        if len(buffer) < header_size:
             return None, 0
-        _, _ = struct.unpack("!BB", buffer[:2])
-        page_size, page_num = struct.unpack("!HH", buffer[2:6])
-        req = {"action": "LIST_ACCOUNTS", "page_size": page_size, "page_num": page_num}
-        return req, 6
+        # unpack version, opcode, page_size, page_num, pattern length
+        version, op_code = struct.unpack("!BB", buffer[:2])
+        page_size, page_num, pattern_len = struct.unpack("!HHH", buffer[2:8])
+        total_needed = header_size + pattern_len
+        if len(buffer) < total_needed:
+            return None, 0
+        pattern_bytes = buffer[8:8+pattern_len]
+        req["action"] = "LIST_ACCOUNTS"
+        req["page_size"] = page_size
+        req["page_num"] = page_num
+        req["pattern"] = pattern_bytes.decode("utf-8")
+        return req, total_needed
 
     elif op_code == OP_CODES_DICT["SEND_MESSAGE"]:
         # Format: !BBH{recipient}sH{message}s
@@ -269,11 +277,9 @@ def decode_message_from_buffer(buffer: bytes):
             return None, 0
         message_bytes = buffer[pos+2: pos+2+message_len]
         total_consumed = pos + 2 + message_len
-        req = {
-            "action": "SEND_MESSAGE",
-            "recipient": recipient_bytes.decode("utf-8"),
-            "content": message_bytes.decode("utf-8")
-        }
+        req["action"] = "SEND_MESSAGE"
+        req["recipient"] = recipient_bytes.decode("utf-8")
+        req["content"] = message_bytes.decode("utf-8")
         return req, total_consumed
 
     elif op_code == OP_CODES_DICT["READ_MESSAGES"]:
@@ -283,7 +289,9 @@ def decode_message_from_buffer(buffer: bytes):
         page_size, page_num = struct.unpack("!HH", buffer[2:6])
         flag = struct.unpack("!B", buffer[6:7])[0]
         pos = 7
-        req = {"action": "READ_MESSAGES", "page_size": page_size, "page_num": page_num}
+        req["action"] = "READ_MESSAGES"
+        req["page_size"] = page_size
+        req["page_num"] = page_num
         if flag == 1:
             if len(buffer) < pos + 2:
                 return None, 0
@@ -311,7 +319,8 @@ def decode_message_from_buffer(buffer: bytes):
             offset = 3 + i * 4
             msg_id = struct.unpack("!I", buffer[offset:offset+4])[0]
             message_ids.append(msg_id)
-        req = {"action": "DELETE_MESSAGE", "message_ids": message_ids}
+        req["action"] = "DELETE_MESSAGE"
+        req["message_ids"] = message_ids
         return req, total_needed
 
     elif op_code == OP_CODES_DICT["CHECK_USERNAME"]:
@@ -323,12 +332,14 @@ def decode_message_from_buffer(buffer: bytes):
         if len(buffer) < total_needed:
             return None, 0
         username_bytes = buffer[4:4+username_len]
-        req = {"action": "CHECK_USERNAME", "username": username_bytes.decode("utf-8")}
+        req["action"] = "CHECK_USERNAME"
+        req["username"] = username_bytes.decode("utf-8")
         return req, total_needed
 
     elif op_code == OP_CODES_DICT["QUIT"]:
         # Format: !BB
-        return {"action": "QUIT"}, 2
+        req["action"] = "QUIT"
+        return req, 2
 
     else:
         logging.error("Unknown opcode received: %s", op_code)
@@ -484,13 +495,15 @@ class ChatServer:
         elif action == "LOGOUT":
             self.handle_logout(client_state)
         elif action == "QUIT":
-            self.send_response(client_state, success=True, message="Connection closed.")
+            self.send_response(client_state, success=True,
+                               message="Connection closed.",
+                               req_opcode=OP_CODES_DICT["QUIT"])
             self.disconnect_client(client_state)
         else:
             self.send_response(client_state, success=False,
                                message=f"Unknown action: {action}")
 
-    def send_response(self, client_state, success=True, message="", data=None):
+    def send_response(self, client_state, success=True, message="", data=None, req_opcode=0):
         """
         Build a binary response using the custom encoding.
         
@@ -514,11 +527,11 @@ class ChatServer:
                 data_bytes = encode_unread_data(data)
                 op_name = "READ_GENERAL"
             else:
-                # Fallback: encode data as JSON bytes.
+                logging.error("Something went wrong. Fallback: encoding data as JSON.")
                 data_bytes = json.dumps(data).encode("utf-8")
         else:
             data_bytes = b""
-        response_bytes = encode_response_bin(success, message, data_bytes, op_name)
+        response_bytes = encode_response_bin(success, message, data_bytes, req_opcode)
         client_state.queue_message(response_bytes)
         logging.debug(f"response sent to {client_state.addr}: success={success}, message='{message}', data_bytes={data_bytes}")
 
@@ -537,26 +550,32 @@ class ChatServer:
         username = request.get("username", "")
         if not username:
             logging.error("No username provided")
-            self.send_response(client_state, success=False, message="Username not provided.")
+            self.send_response(client_state, success=False, message="Username not provided.",
+                               req_opcode=request.get("opcode"))
             return
 
         if username in accounts:
             logging.debug("Username %s already taken", username)
-            self.send_response(client_state, success=True, message="Username exists.")
+            self.send_response(client_state, success=True, message="Username exists.",
+                               req_opcode=request.get("opcode"))
+
         else:
             logging.debug("Username %s does not exist", username)
-            self.send_response(client_state, success=False, message="Username does not exist.")
+            self.send_response(client_state, success=False, message="Username does not exist.",
+                               req_opcode=request.get("opcode"))
 
     def create_account(self, client_state, request):
         username = request.get("username", "")
         password_hash = request.get("password_hash", "")
         if not username or not password_hash:
-            self.send_response(client_state, success=False, message="Username or password not provided.")
+            self.send_response(client_state, success=False, message="Username or password not provided.",
+                               req_opcode=request.get("opcode"))
             logging.warning(f"create_account failed: missing credentials from {client_state.addr}")
             return
 
         if username in accounts:
-            self.send_response(client_state, success=False, message="Username already exists.")
+            self.send_response(client_state, success=False, message="Username already exists.",
+                               req_opcode=request.get("opcode"))
             logging.warning(f"create_account failed: username '{username}' exists from {client_state.addr}")
             return
 
@@ -569,45 +588,83 @@ class ChatServer:
         self.logged_in_users[username] = client_state
 
         msg = f"New account '{username}' created and logged in."
-        self.send_response(client_state, success=True, message=msg)
+        self.send_response(client_state, success=True, message=msg,
+                               req_opcode=request.get("opcode"))
         logging.info(f"account '{username}' created and logged in from {client_state.addr}")
 
     def handle_login(self, client_state, request):
+        req_opcode = request.get("opcode")
         username = request.get("username", "")
         password_hash = request.get("password_hash", "")
         if not username or not password_hash:
-            self.send_response(client_state, success=False, message="Missing credentials.")
-            logging.warning(f"handle_login failed: missing credentials from {client_state.addr}")
+            self.send_response(
+                client_state,
+                success=False,
+                message="missing credentials.",
+                req_opcode=req_opcode,
+            )
+            logging.warning(
+                f"handle_login failed: missing credentials from {client_state.addr}"
+            )
             return
 
         if username not in accounts:
-            self.send_response(client_state, success=False, message="No such user.")
-            logging.warning(f"handle_login failed: no such user '{username}' from {client_state.addr}")
+            self.send_response(
+                client_state,
+                success=False,
+                message="no such user.",
+                req_opcode=req_opcode,
+            )
+            logging.warning(
+                f"handle_login failed: no such user '{username}' from {client_state.addr}"
+            )
             return
 
         if accounts[username]["password_hash"] != password_hash:
-            self.send_response(client_state, success=False, message="Incorrect password.")
-            logging.warning(f"handle_login failed: incorrect password for '{username}' from {client_state.addr}")
+            self.send_response(
+                client_state,
+                success=False,
+                message="incorrect password.",
+                req_opcode=req_opcode,
+            )
+            logging.warning(
+                f"handle_login failed: incorrect password for '{username}' from {client_state.addr}"
+            )
             return
 
         if username in self.logged_in_users:
             old_state = self.logged_in_users[username]
             if old_state is not client_state:
                 old_state.current_user = None
-                logging.info(f"overwriting session for '{username}' from {client_state.addr}")
+                logging.info(
+                    f"overwriting session for '{username}' from {client_state.addr}"
+                )
 
         client_state.current_user = username
         self.logged_in_users[username] = client_state
 
         unread_count = get_unread_count(username)
-        self.send_response(client_state, success=True,
-                           message=f"Logged in as '{username}'. Unread messages: {unread_count}.")
+        self.send_response(
+            client_state,
+            success=True,
+            message=f"logged in as '{username}'. unread messages: {unread_count}.",
+            req_opcode=req_opcode,
+        )
         logging.info(f"user '{username}' logged in from {client_state.addr}")
 
+
     def handle_list_accounts(self, client_state, request):
+        req_opcode = request.get("opcode")
         if client_state.current_user is None:
-            self.send_response(client_state, success=False, message="Please log in first.")
-            logging.warning(f"handle_list_accounts failed: not logged in {client_state.addr}")
+            self.send_response(
+                client_state,
+                success=False,
+                message="please log in first.",
+                req_opcode=req_opcode,
+            )
+            logging.warning(
+                f"handle_list_accounts failed: not logged in {client_state.addr}"
+            )
             return
 
         page_size = request.get("page_size", 10)
@@ -617,14 +674,25 @@ class ChatServer:
         total_accounts = len(all_accounts)
         start_index = (page_num - 1) * page_size
         end_index = start_index + page_size
-        page_accounts = all_accounts[start_index:end_index] if start_index < total_accounts else []
+        page_accounts = (
+            all_accounts[start_index:end_index] if start_index < total_accounts else []
+        )
         data = {"total_accounts": total_accounts, "accounts": page_accounts}
-        self.send_response(client_state, success=True, data=data)
+        self.send_response(
+            client_state, success=True, data=data, req_opcode=req_opcode
+        )
         logging.debug(f"listed accounts for {client_state.addr}: page {page_num}")
 
+
     def handle_send(self, client_state, request):
+        req_opcode = request.get("opcode")
         if client_state.current_user is None:
-            self.send_response(client_state, success=False, message="Please log in first.")
+            self.send_response(
+                client_state,
+                success=False,
+                message="please log in first.",
+                req_opcode=req_opcode,
+            )
             logging.warning(f"handle_send failed: not logged in {client_state.addr}")
             return
 
@@ -632,13 +700,25 @@ class ChatServer:
         recipient = request.get("recipient", "")
         content = request.get("content", "").strip()
         if not recipient or not content:
-            self.send_response(client_state, success=False, message="Recipient or content missing.")
+            self.send_response(
+                client_state,
+                success=False,
+                message="recipient or content missing.",
+                req_opcode=req_opcode,
+            )
             logging.warning(f"handle_send failed: missing data from {client_state.addr}")
             return
 
         if recipient not in accounts:
-            self.send_response(client_state, success=False, message="Recipient does not exist.")
-            logging.warning(f"handle_send failed: recipient '{recipient}' not found from {client_state.addr}")
+            self.send_response(
+                client_state,
+                success=False,
+                message="recipient does not exist.",
+                req_opcode=req_opcode,
+            )
+            logging.warning(
+                f"handle_send failed: recipient '{recipient}' not found from {client_state.addr}"
+            )
             return
 
         global global_message_id
@@ -649,22 +729,37 @@ class ChatServer:
         accounts[recipient]["messages"].append(new_msg)
         if sender not in accounts[recipient]["conversations"]:
             accounts[recipient]["conversations"][sender] = []
-        accounts[recipient]["conversations"][sender].append({
-            "id": msg_id, "content": content, "read": False
-        })
+        accounts[recipient]["conversations"][sender].append(
+            {"id": msg_id, "content": content, "read": False}
+        )
 
-        self.send_response(client_state, success=True,
-                           message=f"Message sent to '{recipient}': {content}")
+        self.send_response(
+            client_state,
+            success=True,
+            message=f"message sent to '{recipient}': {content}",
+            req_opcode=req_opcode,
+        )
         logging.info(f"user '{sender}' sent message id {msg_id} to '{recipient}'")
 
         recipient_state = self.logged_in_users.get(recipient)
         if recipient_state:
-            self.push_event(recipient_state, "NEW_MESSAGE", {"id": msg_id, "sender": sender, "content": content})
+            self.push_event(
+                recipient_state,
+                "NEW_MESSAGE",
+                {"id": msg_id, "sender": sender, "content": content},
+            )
             logging.info(f"pushed new message event to '{recipient}'")
 
+
     def handle_read(self, client_state, request):
+        req_opcode = request.get("opcode")
         if client_state.current_user is None:
-            self.send_response(client_state, success=False, message="Please log in first.")
+            self.send_response(
+                client_state,
+                success=False,
+                message="please log in first.",
+                req_opcode=req_opcode,
+            )
             logging.warning(f"handle_read failed: not logged in {client_state.addr}")
             return
 
@@ -693,17 +788,23 @@ class ChatServer:
                 "page_num": page_num,
                 "page_size": page_size,
                 "total_msgs": total_msgs,
-                "remaining": max(0, total_msgs - end_idx)
+                "remaining": max(0, total_msgs - end_idx),
             }
-            self.send_response(client_state, success=True, data=data)
-            logging.info(f"user '{username}' read conversation with '{chat_partner}'")
+            self.send_response(
+                client_state, success=True, data=data, req_opcode=req_opcode
+            )
+            logging.info(
+                f"user '{username}' read conversation with '{chat_partner}'"
+            )
         else:
             user_msgs = accounts[username]["messages"]
             unread_msgs = [m for m in user_msgs if not m["read"]]
             total_unread = len(unread_msgs)
             start_index = (page_num - 1) * page_size
             end_index = min(start_index + page_size, total_unread)
-            to_read = unread_msgs[start_index:end_index] if start_index < total_unread else []
+            to_read = (
+                unread_msgs[start_index:end_index] if start_index < total_unread else []
+            )
             for m in to_read:
                 m["read"] = True
             conversations = accounts[username].get("conversations", {})
@@ -713,16 +814,31 @@ class ChatServer:
                     for conv_msg in conversations[snd]:
                         if conv_msg["id"] == msg["id"]:
                             conv_msg["read"] = True
-            data = {"read_messages": to_read,
-                    "total_unread": total_unread,
-                    "remaining_unread": max(0, total_unread - end_index)}
-            self.send_response(client_state, success=True, data=data)
-            logging.info(f"user '{username}' read {len(to_read)} unread messages")
+            data = {
+                "read_messages": to_read,
+                "total_unread": total_unread,
+                "remaining_unread": max(0, total_unread - end_index),
+            }
+            self.send_response(
+                client_state, success=True, data=data, req_opcode=req_opcode
+            )
+            logging.info(
+                f"user '{username}' read {len(to_read)} unread messages"
+            )
+
 
     def handle_delete_message(self, client_state, request):
+        req_opcode = request.get("opcode")
         if client_state.current_user is None:
-            self.send_response(client_state, success=False, message="Please log in first.")
-            logging.warning(f"handle_delete_message failed: not logged in {client_state.addr}")
+            self.send_response(
+                client_state,
+                success=False,
+                message="please log in first.",
+                req_opcode=req_opcode,
+            )
+            logging.warning(
+                f"handle_delete_message failed: not logged in {client_state.addr}"
+            )
             return
 
         username = client_state.current_user
@@ -737,43 +853,70 @@ class ChatServer:
         for partner, msg_list in conversations.items():
             conversations[partner] = [m for m in msg_list if m["id"] not in message_ids]
         deleted_count = before_count - len(new_msgs)
-        self.send_response(client_state, success=True, message=f"Deleted {deleted_count} messages.")
-        logging.info(f"user '{username}' deleted {deleted_count} messages")
+        self.send_response(
+            client_state,
+            success=True,
+            message=f"deleted {deleted_count} messages.",
+            req_opcode=req_opcode,
+        )
+        logging.info(
+            f"user '{username}' deleted {deleted_count} messages"
+        )
+
 
     def handle_delete_account(self, client_state):
+        # no opcode is available since no request payload is passed; using None.
+        req_opcode = None
         if client_state.current_user is None:
-            self.send_response(client_state, success=False, message="Please log in first.")
-            logging.warning(f"handle_delete_account failed: not logged in {client_state.addr}")
+            self.send_response(
+                client_state,
+                success=False,
+                message="please log in first.",
+                req_opcode=req_opcode,
+            )
+            logging.warning(
+                f"handle_delete_account failed: not logged in {client_state.addr}"
+            )
             return
 
         username = client_state.current_user
         del accounts[username]
         self.logged_in_users.pop(username, None)
         client_state.current_user = None
-        self.send_response(client_state, success=True, message=f"Account '{username}' deleted.")
+        self.send_response(
+            client_state,
+            success=True,
+            message=f"account '{username}' deleted.",
+            req_opcode=req_opcode,
+        )
         logging.info(f"account '{username}' deleted")
 
+
     def handle_logout(self, client_state):
+        # no opcode is available since logout is triggered without a request payload.
+        req_opcode = None
         if client_state.current_user is None:
-            self.send_response(client_state, success=False, message="No user is currently logged in.")
-            logging.warning(f"handle_logout failed: no user logged in from {client_state.addr}")
+            self.send_response(
+                client_state,
+                success=False,
+                message="no user is currently logged in.",
+                req_opcode=req_opcode,
+            )
+            logging.warning(
+                f"handle_logout failed: no user logged in from {client_state.addr}"
+            )
         else:
             user = client_state.current_user
             client_state.current_user = None
             self.logged_in_users.pop(user, None)
-            self.send_response(client_state, success=True, message=f"User '{user}' logged out.")
+            self.send_response(
+                client_state,
+                success=True,
+                message=f"user '{user}' logged out.",
+                req_opcode=req_opcode,
+            )
             logging.info(f"user '{user}' logged out from {client_state.addr}")
 
-    def disconnect_client(self, client_state):
-        """
-        Unregister and close the client socket.
-        """
-        print(f"[SERVER] Disconnecting {client_state.addr}")
-        logging.info(f"disconnecting {client_state.addr}")
-        self.selector.unregister(client_state.sock)
-        if client_state.current_user in self.logged_in_users:
-            self.logged_in_users.pop(client_state.current_user, None)
-        client_state.close()
 
 if __name__ == "__main__":
     server = ChatServer(HOST, PORT)
