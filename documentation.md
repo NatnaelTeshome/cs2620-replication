@@ -9,16 +9,16 @@
    - [Supported Operations](#supported-operations)
    - [Protocol Formats](#protocol-formats)
    - [Operations and Payload Examples](#operations-and-payload-examples)
-4. [Protocol Implementations and Toggling](#protocol-implementations-and-toggling)
-5. [Discussion of design choices](#design-choices)
-6. [API References](#api-references)
+4. [API References](#api-references)
    - [Server-Side Endpoints](#server-side-endpoints)
    - [Client-Side Methods](#client-side-methods)
-7. [Deployment, Configuration, and Testing](#deployment-configuration-and-testing)
+5. [Deployment, Configuration, and Testing](#deployment-configuration-and-testing)
 
 ---
 
 ## Project Overview
+
+(Please refer to custom wire protocol pdf for wire protocol specific documentation)
 
 ChatSystem2620 is a simple client-server chat application that supports real-time text messaging between users. A centralized server (implemented by `server.py`) mediates interactions between multiple clients (implemtented by `client.py`). Core functionality includes:
 
@@ -84,7 +84,7 @@ Each operation is identified by its `"action"` key (case-insensitive) and includ
   To delete a message, the user hovers on the message and clicks a delete button. Then, it gets deleted for both the user and the recepient. 
   
 - **DELETE_ACCOUNT:**  
-  Deletes the currently logged-in account. TODO: The semantics for handling unread messages are defined within the implementation.
+  Deletes the currently logged-in account.
   When account is deleted, the unread messages are displayed to the receipient. We made this decision after taking inspiration from popular chat apps like Telegram.
 
 - **LOGOUT:**  
@@ -216,41 +216,6 @@ Below are sample JSON payloads to illustrate key operations:
 
 Responses and push events follow similar conventions using JSON objects. 
 
----
-
-## Toggling Between Protocols
-
-- **Mechanism:**  
-  TODO: A configuration switch or command-line flag (e.g., `--protocol json` or `--protocol custom`) can be used during client initialization to select the desired protocol handler.
-  
-- **Server Configuration:**  
-  In `config.json`, an optional field like `"protocol": "json"` or `"protocol": "custom"` can determine the default behavior on the server. The command-line flags take
-  precedence over the options specified in the config file.
-  
-TODO: Performance measurements comparing the two protocols (documented in the engineering notebook) indicate:
-- The **custom protocol** achieves reduced payload sizes.
-- The **JSON protocol** offers simplicity in debugging at the cost of additional overhead.
-
----
-
-
-## Discussion of design choices
-
-### Why selectors? Why not threads?
-TODO: Natnael discussion
-
-### Why TKInter for frontend GUI?
-
-### Why 'shelve' for persistence?
-
-### Why TODO: XYZ design choice about protocol?
-TODO: Michal, Natnael
-
-### Why Python?
-
-### 
-
----
 
 ## API References
 
