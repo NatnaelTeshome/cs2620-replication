@@ -10,10 +10,11 @@
    - [Protocol Formats](#protocol-formats)
    - [Operations and Payload Examples](#operations-and-payload-examples)
 4. [Protocol Implementations and Toggling](#protocol-implementations-and-toggling)
-5. [API References](#api-references)
+5. [Discussion of design choices](#design-choices)
+6. [API References](#api-references)
    - [Server-Side Endpoints](#server-side-endpoints)
    - [Client-Side Methods](#client-side-methods)
-6. [Deployment, Configuration, and Testing](#deployment-configuration-and-testing)
+7. [Deployment, Configuration, and Testing](#deployment-configuration-and-testing)
 
 ---
 
@@ -230,6 +231,25 @@ TODO: Performance measurements comparing the two protocols (documented in the en
 
 ---
 
+
+## Discussion of design choices
+
+### Why selectors? Why not threads?
+TODO: Natnael discussion
+
+### Why TKInter for frontend GUI?
+
+### Why 'shelve' for persistence?
+
+### Why TODO: XYZ design choice about protocol?
+TODO: Michal, Natnael
+
+### Why Python?
+
+### 
+
+---
+
 ## API References
 
 ### Server-Side Endpoints
@@ -341,7 +361,11 @@ The client library maps the above actions to high-level methods, which we then u
 - `close()`
 
 Each method sets up the proper payload, sends the request, waits for and processes the response.
-Asynchronous push events the client receives from the server are handled via a dedicated listener thread. 
+Asynchronous push events the client receives from the server are handled via a dedicated listener thread. The listener
+threads spins in a while-loop, continuously awaiting any incoming messages from the server. Any push events 
+(like e.g. a new message arriving) are then handled through callback functions (e.g., 'self.on_new_message') called by the listener thread.
+The callbacks then take care of, e.g. in the case of the *new message* callback, updating the client-side message cache, as well
+as refreshing the UI to display the new message to the user.
 
 ---
 
