@@ -381,6 +381,7 @@ as refreshing the UI to display the new message to the user.
   - Unit tests target each endpoint using dummy clients (see `MockClient` in `client.py`).
   - GUI testing is done using a dummy MockClient class, which fakes a connection to a backend server. This massively improved our bandwidth
   in testing the GUI for this assignment.
+  We have unit tests for the server and the client (please see `test_chat_server.py`, `test_client.py`, `test_custom_protocol_client.py`, and `test_custom_protocol_server.py`). You can run them by installing `pytest` and running `pytest {filename}`.
 
 - **Logging and Debugging:**  
   - Extensive logging is enabled (with Python’s `logging` module) for network events, errors, and debugging information. For the clients,
