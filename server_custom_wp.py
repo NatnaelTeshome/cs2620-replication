@@ -7,6 +7,8 @@ import struct
 import fnmatch
 import shelve
 
+from datetime import datetime
+
 logging.basicConfig(level=logging.DEBUG,
                     format='[%(asctime)s] [%(levelname)s] %(message)s')
 
@@ -97,6 +99,7 @@ def encode_conversation_data(data: dict) -> bytes:
         result += struct.pack("!I", msg_id)
         result += struct.pack("!H", len(content_bytes)) + content_bytes
         result += struct.pack("!B", read_flag)
+        result += struct.pack("!I", timestamp)
     return result
 
 def encode_unread_data(data: dict) -> bytes:
@@ -118,6 +121,7 @@ def encode_unread_data(data: dict) -> bytes:
         result += struct.pack("!H", len(sender_bytes)) + sender_bytes
         result += struct.pack("!H", len(content_bytes)) + content_bytes
         result += struct.pack("!B", read_flag)
+        result += struct.pack("!I", timestamp)
     return result
 
 def encode_response_bin(success: bool, message: str = "",
@@ -142,11 +146,12 @@ def encode_new_message_event(data: dict) -> bytes:
     msg_id = data.get("id", 0)
     sender = data.get("from", "")
     content = data.get("content", "")
+    timestamp = data.get("timestamp", 0)
     sender_bytes = sender.encode("utf-8")
     content_bytes = content.encode("utf-8")
-    fmt = f"!I H{len(sender_bytes)}s H{len(content_bytes)}s"
+    fmt = f"!I H{len(sender_bytes)}s H{len(content_bytes)}s I"
     return struct.pack(fmt, msg_id, len(sender_bytes), sender_bytes,
-                       len(content_bytes), content_bytes)
+                       len(content_bytes), content_bytes, timestamp)
 
 def encode_delete_message_event(data: dict) -> bytes:
     msg_ids = data.get("message_ids", [])
@@ -590,7 +595,8 @@ class ChatServer:
         global global_message_id
         global_message_id += 1
         msg_id = global_message_id
-        new_msg = {"id": msg_id, "from": sender, "to": recipient, "content": content, "read": False}
+        new_msg = {"id": msg_id, "from": sender, "to": recipient,
+                   "content": content, "read": False, "timestamp": int(datetime.now().timestamp())}
         accounts[recipient]["messages"].append(new_msg)
         if sender not in accounts[recipient]["conversations"]:
             accounts[recipient]["conversations"][sender] = []
@@ -611,7 +617,9 @@ class ChatServer:
         recipient_state = self.logged_in_users.get(recipient)
         if recipient_state:
             self.push_event(recipient_state, "NEW_MESSAGE",
-                            {"id": msg_id, "from": sender, "content": content})
+                            {"id": msg_id, "from": sender,
+                             "content": content,
+                             "timestamp": int(datetime.now().timestamp())})
             logging.info(f"pushed new message event to '{recipient}'")
         persist_data()
 

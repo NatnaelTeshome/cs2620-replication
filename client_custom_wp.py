@@ -190,7 +190,17 @@ def decode_data_bytes(data_bytes: bytes, opcode=None) -> any:
                 pos += content_len
                 read_flag = struct.unpack("!B", payload[pos:pos+1])[0]
                 pos += 1
-                messages.append({"id": msg_id, "content": content, "read": bool(read_flag)})
+                # Read timestamp (unsignet int, 4 bytes, for a UNIX timestamp)
+                if len(payload) < pos + 4:
+                    raise ValueError("insufficient data for timestamp")
+                timestamp = struct.unpack("!I", payload[pos:pos+4])[0]
+                pos += 4
+                messages.append({
+                    "id": msg_id,
+                    "content": content,
+                    "read": bool(read_flag),
+                    "timestamp": timestamp
+                })
             return {"conversation_with": conv_with, "page_num": page_num,
                     "page_size": page_size, "total_msgs": total_msgs,
                     "remaining": remaining, "messages": messages}
@@ -222,8 +232,18 @@ def decode_data_bytes(data_bytes: bytes, opcode=None) -> any:
                 pos += content_len
                 read_flag = struct.unpack("!B", payload[pos:pos+1])[0]
                 pos += 1
-                messages.append({"id": msg_id, "from": sender, "content": content,
-                                 "read": bool(read_flag)})
+                # read UNIX timestamp (unsigned int)
+                if len(payload) < pos + 4:
+                    raise ValueError("insufficient data for timestamp")
+                timestamp = struct.unpack("!I", payload[pos:pos+4])[0]
+                pos += 4
+                messages.append({
+                    "id": msg_id,
+                    "from": sender,
+                    "content": content,
+                    "read": bool(read_flag),
+                    "timestamp": timestamp
+                })
             return {"total_unread": total_unread, "remaining_unread": remaining_unread,
                     "read_messages": messages}
     elif opcode == OP_CODES_DICT["SEND_MESSAGE"]:
@@ -265,7 +285,12 @@ def decode_push_event(payload: bytes) -> dict:
         if len(data_bytes) < pos + content_len:
             raise ValueError("insufficient data for content in new_message event")
         content = data_bytes[pos:pos+content_len].decode("utf-8")
-        return {"event": "NEW_MESSAGE", "data": {"id": msg_id, "from": sender, "content": content}}
+        pos += content_len
+        # decode timestamp (unsigned int 4 bytes)
+        if len(data_bytes) < pos + 4:
+            raise ValueError("insufficient data for timestamp in new_message event")
+        timestamp = struct.unpack("!I", data_bytes[pos:pos+4])[0]
+        return {"event": "NEW_MESSAGE", "data": {"id": msg_id, "from": sender, "content": content, "timestamp": timestamp}}
     elif event_type == EVENT_DELETE_MESSAGE:
         # delete_message: count (B) then count * message_id (I)
         if len(data_bytes) < 1:
