@@ -427,7 +427,7 @@ class CustomProtocolClient:
             raise Exception(response.get("message", "Account creation failed"))
         self.username = username
 
-    def delete_account(self) -> None:
+    def delete_account(self, _payload=None) -> None:
         payload = {"action": "DELETE_ACCOUNT"}
         response = self._send_request(payload)
         if not response.get("success", False):

@@ -6,11 +6,14 @@ import logging
 import struct
 import fnmatch
 import shelve
+import threading
 
 from datetime import datetime
 
 logging.basicConfig(level=logging.DEBUG,
                     format='[%(asctime)s] [%(levelname)s] %(message)s')
+
+lock = threading.Lock()
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -53,6 +56,7 @@ else:
     db["global_message_id"] = global_message_id
 
 def persist_data():
+    assert lock.locked(), "global lock must be held when calling persist_data"
     db["accounts"] = accounts
     db["id_to_message"] = id_to_message
     db["global_message_id"] = global_message_id
@@ -467,7 +471,9 @@ class ChatServer:
             self.send_response(client_state, success=False, message="Username not provided.",
                                req_opcode=request.get("opcode"))
             return
-        if username in accounts:
+        with lock:
+            exists = username in accounts
+        if exists:
             logging.debug("Username %s already taken", username)
             self.send_response(client_state, success=True, message="Username exists.",
                                req_opcode=request.get("opcode"))
@@ -489,18 +495,25 @@ class ChatServer:
                                req_opcode=request.get("opcode"))
             logging.warning(f"create_account failed: username '{username}' exists from {client_state.addr}")
             return
-        accounts[username] = {
-            "password_hash": password_hash,
-            "messages": [],
-            "conversations": {}
-        }
+        with lock:
+            if username in accounts:
+                self.send_response(client_state, success=False,
+                                message="Username already exists.",
+                                req_opcode=request.get("opcode"))
+                logging.warning(f"create_account failed: username '{username}' exists from {client_state.addr}")
+                return
+            accounts[username] = {
+                "password_hash": password_hash,
+                "messages": [],
+                "conversations": {}
+            }
+            persist_data()
         client_state.current_user = username
         self.logged_in_users[username] = client_state
         msg = f"New account '{username}' created and logged in."
         self.send_response(client_state, success=True, message=msg,
-                               req_opcode=request.get("opcode"))
+                        req_opcode=request.get("opcode"))
         logging.info(f"account '{username}' created and logged in from {client_state.addr}")
-        persist_data()
 
     def handle_login(self, client_state, request):
         req_opcode = request.get("opcode")
@@ -582,155 +595,167 @@ class ChatServer:
         data = {"total_accounts": total_accounts, "accounts": page_accounts}
         self.send_response(client_state, success=True, data=data, req_opcode=req_opcode)
         logging.debug(f"listed accounts for {client_state.addr}: page {page_num}")
-
     def handle_send(self, client_state, request):
         req_opcode = request.get("opcode")
         if client_state.current_user is None:
             self.send_response(client_state, success=False, message="please log in first.",
-                               req_opcode=req_opcode)
+                            req_opcode=req_opcode)
             logging.warning(f"handle_send failed: not logged in {client_state.addr}")
             return
         sender = client_state.current_user
         recipient = request.get("to", "")
         content = request.get("content", "").strip()
         if not recipient or not content:
-            self.send_response(client_state, success=False, message="recipient or content missing.",
-                               req_opcode=req_opcode)
+            self.send_response(client_state, success=False,
+                            message="recipient or content missing.",
+                            req_opcode=req_opcode)
             logging.warning(f"handle_send failed: missing data from {client_state.addr}")
             return
-        if recipient not in accounts:
-            self.send_response(client_state, success=False, message="recipient does not exist.",
-                               req_opcode=req_opcode)
-            logging.warning(f"handle_send failed: recipient '{recipient}' not found from {client_state.addr}")
-            return
-        global global_message_id
-        global_message_id += 1
-        msg_id = global_message_id
-        new_msg = {"id": msg_id, "from": sender, "to": recipient,
-                   "content": content, "read": False, "timestamp": int(datetime.now().timestamp())}
-        accounts[recipient]["messages"].append(new_msg)
-        if sender not in accounts[recipient]["conversations"]:
-            accounts[recipient]["conversations"][sender] = []
-        accounts[recipient]["conversations"][sender].append(
-            {"id": msg_id, "content": content, "read": False}
-        )
 
-        # Store the message in our ID to msg mapping
-        id_to_message[msg_id] = new_msg
+        with lock:
+            if recipient not in accounts:
+                self.send_response(client_state, success=False,
+                                message="recipient does not exist.",
+                                req_opcode=req_opcode)
+                logging.warning(f"handle_send failed: recipient '{recipient}' not found from {client_state.addr}")
+                return
 
-        # Acknowledge to the sender
-        self.send_response(client_state, success=True,
-                           data={"id": msg_id},
-                           req_opcode=req_opcode)
+            global global_message_id
+            global_message_id += 1
+            msg_id = global_message_id
+
+            new_msg = {
+                "id": msg_id,
+                "from": sender,
+                "to": recipient,
+                "content": content,
+                "read": False,
+                "timestamp": int(datetime.now().timestamp())
+            }
+            accounts[recipient]["messages"].append(new_msg)
+            if sender not in accounts[recipient]["conversations"]:
+                accounts[recipient]["conversations"][sender] = []
+            accounts[recipient]["conversations"][sender].append(
+                {"id": msg_id, "content": content, "read": False}
+            )
+            id_to_message[msg_id] = new_msg
+
+            persist_data()
+
+        # Notify the sender and (if logged in) the recipient.
+        self.send_response(client_state, success=True, data={"id": msg_id},
+                        req_opcode=req_opcode)
         logging.info(f"user '{sender}' sent message id {msg_id} to '{recipient}'")
-
-        # If recipient is logged in, push a notification to them
         recipient_state = self.logged_in_users.get(recipient)
         if recipient_state:
             self.push_event(recipient_state, "NEW_MESSAGE",
                             {"id": msg_id, "from": sender,
-                             "content": content,
-                             "timestamp": int(datetime.now().timestamp())})
+                            "content": content,
+                            "timestamp": int(datetime.now().timestamp())})
             logging.info(f"pushed new message event to '{recipient}'")
-        persist_data()
 
     def handle_read(self, client_state, request):
         req_opcode = request.get("opcode")
         if client_state.current_user is None:
-            self.send_response(client_state, success=False, message="please log in first.",
-                               req_opcode=req_opcode)
+            self.send_response(client_state, success=False,
+                            message="please log in first.",
+                            req_opcode=req_opcode)
             logging.warning(f"handle_read failed: not logged in {client_state.addr}")
             return
         username = client_state.current_user
-        chat_partner = request.get("chat_partner", None)
         page_size = request.get("page_size", 5)
         page_num = request.get("page_num", 1)
-        if chat_partner is not None:
-            conversations = accounts[username].get("conversations", {})
-            partner_msgs = conversations.get(chat_partner, [])
-            total_msgs = len(partner_msgs)
-            start_idx = (page_num - 1) * page_size
-            end_idx = min(start_idx + page_size, total_msgs)
-            paginated = partner_msgs[start_idx:end_idx] if start_idx < total_msgs else []
-            for msg in paginated:
-                msg["read"] = True
-            all_msgs = accounts[username].get("messages", [])
-            paginated_ids = {m["id"] for m in paginated}
-            for m in all_msgs:
-                if m["id"] in paginated_ids:
-                    m["read"] = True
-            data = {"conversation_with": chat_partner,
+        with lock:
+            if "chat_partner" in request:
+                chat_partner = request.get("chat_partner")
+                conversations = accounts[username].get("conversations", {})
+                partner_msgs = conversations.get(chat_partner, [])
+                total_msgs = len(partner_msgs)
+                start_idx = (page_num - 1) * page_size
+                end_idx = min(start_idx + page_size, total_msgs)
+                paginated = partner_msgs[start_idx:end_idx] if start_idx < total_msgs else []
+                for msg in paginated:
+                    msg["read"] = True
+                all_msgs = accounts[username].get("messages", [])
+                paginated_ids = {m["id"] for m in paginated}
+                for m in all_msgs:
+                    if m["id"] in paginated_ids:
+                        m["read"] = True
+                data = {
+                    "conversation_with": chat_partner,
                     "messages": paginated,
                     "page_num": page_num,
                     "page_size": page_size,
                     "total_msgs": total_msgs,
-                    "remaining": max(0, total_msgs - end_idx)}
-            self.send_response(client_state, success=True, data=data, req_opcode=req_opcode)
-            logging.info(f"user '{username}' read conversation with '{chat_partner}'")
-        else:
-            user_msgs = accounts[username]["messages"]
-            unread_msgs = [m for m in user_msgs if not m["read"]]
-            total_unread = len(unread_msgs)
-            start_index = (page_num - 1) * page_size
-            end_index = min(start_index + page_size, total_unread)
-            to_read = unread_msgs[start_index:end_index] if start_index < total_unread else []
-            for m in to_read:
-                m["read"] = True
-            conversations = accounts[username].get("conversations", {})
-            for msg in to_read:
-                snd = msg["from"]
-                if snd in conversations:
-                    for conv_msg in conversations[snd]:
-                        if conv_msg["id"] == msg["id"]:
-                            conv_msg["read"] = True
-            data = {"read_messages": to_read,
+                    "remaining": max(0, total_msgs - end_idx)
+                }
+                persist_data()
+            else:
+                user_msgs = accounts[username]["messages"]
+                unread_msgs = [m for m in user_msgs if not m["read"]]
+                total_unread = len(unread_msgs)
+                start_index = (page_num - 1) * page_size
+                end_index = min(start_index + page_size, total_unread)
+                to_read = unread_msgs[start_index:end_index] if start_index < total_unread else []
+                for m in to_read:
+                    m["read"] = True
+                conversations = accounts[username].get("conversations", {})
+                for m in to_read:
+                    snd = m["from"]
+                    if snd in conversations:
+                        for conv_msg in conversations[snd]:
+                            if conv_msg["id"] == m["id"]:
+                                conv_msg["read"] = True
+                data = {
+                    "read_messages": to_read,
                     "total_unread": total_unread,
-                    "remaining_unread": max(0, total_unread - end_index)}
-            logging.debug(f"Data to be sent over the wire: {data}")
-            self.send_response(client_state, success=True, data=data, req_opcode=req_opcode)
-            logging.info(f"user '{username}' read {len(to_read)} unread messages")
-        persist_data()
+                    "remaining_unread": max(0, total_unread - end_index)
+                }
+                persist_data()
+        self.send_response(client_state, success=True, data=data, req_opcode=req_opcode)
+        logging.info(f"user '{username}' read messages")
 
     def handle_delete_message(self, client_state, request):
         req_opcode = request.get("opcode")
         if client_state.current_user is None:
-            self.send_response(client_state, success=False, message="please log in first.",
-                               req_opcode=req_opcode)
+            self.send_response(client_state, success=False,
+                            message="please log in first.",
+                            req_opcode=req_opcode)
             logging.warning(f"handle_delete_message failed: not logged in {client_state.addr}")
             return
         username = client_state.current_user
-        message_ids = request.get("message_ids", [])
-        if not isinstance(message_ids, list):
-            message_ids = [message_ids]
-        affected_users = set()
-        for msg_id in message_ids:
-            msg = id_to_message.get(msg_id)
-            if msg:
-                affected_users.add(msg["from"])
-                affected_users.add(msg["to"])
-        affected_users.discard(username)
-        logging.debug("message ids %s deleted. will notify users: %s",
-                      str(message_ids), str(affected_users))
-        user_msgs = accounts.get(username, {}).get("messages", [])
-        if isinstance(user_msgs, list):
-            accounts[username]["messages"] = [m for m in user_msgs if m["id"] not in message_ids]
-        for msg_id in message_ids:
-            msg_obj = id_to_message.get(msg_id)
-            if not msg_obj:
-                logging.error("message with id %s doesn't exist?", str(msg_id))
-                continue
-            receiver = msg_obj["to"]
-            receiver_msgs = accounts.get(receiver, {}).get("messages", [])
-            if isinstance(receiver_msgs, list):
-                accounts[receiver]["messages"] = [m for m in receiver_msgs if m["id"] not in message_ids]
-            receiver_conversations = accounts.get(receiver, {}).get("conversations", {})
-            sender = msg_obj["from"]
-            if sender in receiver_conversations and isinstance(receiver_conversations[sender], list):
-                receiver_conversations[sender] = [m for m in receiver_conversations[sender] if m["id"] not in message_ids]
-            id_to_message.pop(msg_id, None)
-        conversations = accounts[username]["conversations"]
-        for partner in conversations:
-            conversations[partner] = [m for m in conversations[partner] if m["id"] not in message_ids]
+        with lock:
+            message_ids = request.get("message_ids", [])
+            if not isinstance(message_ids, list):
+                message_ids = [message_ids]
+            affected_users = set()
+            for msg_id in message_ids:
+                msg = id_to_message.get(msg_id)
+                if msg:
+                    affected_users.add(msg["from"])
+                    affected_users.add(msg["to"])
+            affected_users.discard(username)
+            user_msgs = accounts.get(username, {}).get("messages", [])
+            if isinstance(user_msgs, list):
+                accounts[username]["messages"] = [m for m in user_msgs if m["id"] not in message_ids]
+            for msg_id in message_ids:
+                msg_obj = id_to_message.get(msg_id)
+                if not msg_obj:
+                    logging.error("message with id %s doesn't exist?", str(msg_id))
+                    continue
+                receiver = msg_obj["to"]
+                receiver_msgs = accounts.get(receiver, {}).get("messages", [])
+                if isinstance(receiver_msgs, list):
+                    accounts[receiver]["messages"] = [m for m in receiver_msgs if m["id"] not in message_ids]
+                receiver_conversations = accounts.get(receiver, {}).get("conversations", {})
+                sender = msg_obj["from"]
+                if sender in receiver_conversations and isinstance(receiver_conversations[sender], list):
+                    receiver_conversations[sender] = [m for m in receiver_conversations[sender] if m["id"] not in message_ids]
+                id_to_message.pop(msg_id, None)
+            conversations = accounts[username]["conversations"]
+            for partner in conversations:
+                conversations[partner] = [m for m in conversations[partner] if m["id"] not in message_ids]
+            persist_data()
         for user in affected_users:
             if user in accounts:
                 recipient_state = self.logged_in_users.get(user)
@@ -739,42 +764,51 @@ class ChatServer:
                     logging.info(f"pushed DELETE_MESSAGE event to '{user}'")
             else:
                 logging.error("cannot delete message for non-existent user %s", user)
+        # Note: The calculation below is for demonstration only.
         new_msgs = accounts[username]["messages"]
-        deleted_count = len(user_msgs) - len(new_msgs)
+        deleted_count = len(message_ids) - len(new_msgs)
         msg = f"deleted {deleted_count} messages."
-        self.send_response(client_state, success=True, message=msg, req_opcode=req_opcode)
+        self.send_response(client_state, success=True, message=msg,
+                        req_opcode=req_opcode)
         logging.info(f"user '{username}' deleted {deleted_count} messages")
-        persist_data()
+
 
     def handle_delete_account(self, client_state):
         req_opcode = OP_CODES_DICT["DELETE_ACCOUNT"]
         if client_state.current_user is None:
-            self.send_response(client_state, success=False, message="please log in first.",
-                               req_opcode=req_opcode)
+            self.send_response(client_state, success=False,
+                            message="please log in first.",
+                            req_opcode=req_opcode)
             logging.warning(f"handle_delete_account failed: not logged in {client_state.addr}")
             return
         username = client_state.current_user
-        del accounts[username]
+        with lock:
+            del accounts[username]
+            persist_data()
         self.logged_in_users.pop(username, None)
         client_state.current_user = None
-        self.send_response(client_state, success=True, message=f"account '{username}' deleted.",
-                           req_opcode=req_opcode)
+        self.send_response(client_state, success=True,
+                        message=f"account '{username}' deleted.",
+                        req_opcode=req_opcode)
         logging.info(f"account '{username}' deleted")
-        persist_data()
+
 
     def handle_logout(self, client_state):
         req_opcode = None
-        if client_state.current_user is None:
-            self.send_response(client_state, success=False, message="no user is currently logged in.",
-                               req_opcode=req_opcode)
-            logging.warning(f"handle_logout failed: no user logged in from {client_state.addr}")
-        else:
-            user = client_state.current_user
-            client_state.current_user = None
-            self.logged_in_users.pop(user, None)
-            self.send_response(client_state, success=True, message=f"user '{user}' logged out.",
-                               req_opcode=req_opcode)
-            logging.info(f"user '{user}' logged out from {client_state.addr}")
+        with lock:
+            if client_state.current_user is None:
+                self.send_response(client_state, success=False,
+                                message="no user is currently logged in.",
+                                req_opcode=req_opcode)
+                logging.warning(f"handle_logout failed: no user logged in from {client_state.addr}")
+            else:
+                user = client_state.current_user
+                client_state.current_user = None
+                self.logged_in_users.pop(user, None)
+                self.send_response(client_state, success=True,
+                                message=f"user '{user}' logged out.",
+                                req_opcode=req_opcode)
+                logging.info(f"user '{user}' logged out from {client_state.addr}")
 
     def disconnect_client(self, client_state):
         logging.info(f"disconnecting {client_state.addr}")
