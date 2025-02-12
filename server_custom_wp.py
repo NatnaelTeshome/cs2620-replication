@@ -34,6 +34,11 @@ OP_CODES_DICT = {
     "QUIT": 9
 }
 
+EVENT_TYPES = {
+    "NEW_MESSAGE": 0,
+    "DELETE_MESSAGE": 1
+}
+
 # --- Helper Functions for Binarizing Data ---
 
 def encode_list_accounts_data(data: dict) -> bytes:
@@ -194,16 +199,33 @@ def encode_response(response: dict) -> bytes:
     header = struct.pack("!BBH", VERSION, 0, length)
     return header + response_bytes
 
-def encode_event(event: dict) -> bytes:
+def encode_event(event_type: int, data_bytes: bytes) -> bytes:
     """
     Encode a push event dict into our binary protocol.
-    We'll also use opcode 0 for events.
+    We always use opcode 0 for events.
     """
-    event_json = json.dumps(event)
-    event_bytes = event_json.encode("utf-8")
-    length = len(event_bytes)
-    header = struct.pack("!BBH", VERSION, 0, length)
-    return header + event_bytes
+    payload = struct.pack("!B", event_type) + data_bytes
+    header = struct.pack("!BBH", VERSION, 0, len(payload))
+    return header + payload
+
+def encode_new_message_event(data: dict) -> bytes:
+    # expected data: {"id": int, "sender": str, "content": str}
+    msg_id = data.get("id", 0)
+    sender = data.get("sender", "")
+    content = data.get("content", "")
+    sender_bytes = sender.encode("utf-8")
+    content_bytes = content.encode("utf-8")
+    fmt = f"!I H{len(sender_bytes)}s H{len(content_bytes)}s"
+    return struct.pack(fmt, msg_id, len(sender_bytes), sender_bytes,
+                       len(content_bytes), content_bytes)
+
+def encode_delete_message_event(data: dict) -> bytes:
+    # expected data: {"message_ids": list[int]}
+    msg_ids = data.get("message_ids", [])
+    count = len(msg_ids)
+    fmt = f"!B{count}I"
+    return struct.pack(fmt, count, *msg_ids)
+
 
 def decode_message_from_buffer(buffer: bytes):
     """
@@ -447,7 +469,6 @@ class ChatServer:
             client_state.in_buffer += data
             try:
                 while True:
-                    print("while loop works")
                     req, consumed = decode_message_from_buffer(client_state.in_buffer)
                     if req is None or consumed == 0:
                         break
@@ -537,15 +558,6 @@ class ChatServer:
         client_state.queue_message(response_bytes)
         logging.debug(f"response sent to {client_state.addr}: success={success}, message='{message}', data_bytes={data_bytes}")
 
-    def push_event(self, client_state, event_name: str, event_payload: dict) -> None:
-        """
-        Build an event message, encode it, and enqueue it for sending.
-        """
-        push_msg = {"event": event_name, "data": event_payload}
-        event_bytes = encode_event(push_msg)
-        client_state.queue_message(event_bytes)
-        logging.debug(f"pushed event '{event_name}' to {client_state.addr}: {event_payload}")
-
     # --- Endpoint Handlers ---
 
     def check_username(self, client_state, request):
@@ -593,6 +605,20 @@ class ChatServer:
         self.send_response(client_state, success=True, message=msg,
                                req_opcode=request.get("opcode"))
         logging.info(f"account '{username}' created and logged in from {client_state.addr}")
+
+    def push_event(self, client_state, event_type: str, event_payload: dict) -> None:
+        if event_type == "NEW_MESSAGE":
+            event_specific_payload = encode_new_message_event(event_payload)
+            etype_code = EVENT_TYPES["NEW_MESSAGE"]
+        elif event_type == "DELETE_MESSAGE":
+            event_specific_payload = encode_delete_message_event(event_payload)
+            etype_code = EVENT_TYPES["DELETE_MESSAGE"]
+        else:
+            logging.error(f"unknown event type: {event_type}")
+            return
+        push_bytes = encode_event(etype_code, event_specific_payload)
+        client_state.queue_message(push_bytes)
+        logging.debug(f"pushed event {event_type} to {client_state.addr}")
 
     def handle_login(self, client_state, request):
         req_opcode = request.get("opcode")

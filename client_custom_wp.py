@@ -1,10 +1,11 @@
 import socket
+import struct
+import sys
 import json
 import threading
 import queue
 import hashlib
 from typing import Optional, Dict, Any, List
-import struct
 
 VERSION = 1
 
@@ -19,6 +20,10 @@ OP_CODES_DICT = {
     "CHECK_USERNAME": 8,
     "QUIT": 9
 }
+
+# define event type codes
+EVENT_NEW_MESSAGE = 0
+EVENT_DELETE_MESSAGE = 1
 
 def encode_login(payload) -> bytes:
     op_code = OP_CODES_DICT["LOGIN"]
@@ -224,7 +229,54 @@ def decode_data_bytes(data_bytes: bytes, opcode=None) -> any:
     else:
         # fallback to json decode.
         return json.loads(data_bytes.decode("utf-8"))
-            
+
+def decode_push_event(payload: bytes) -> dict:
+    """
+    decode a push event payload.
+    expected format:
+      - event type (B): 0=new_message, 1=delete_message
+      - event-specific data:
+          * for new_message: message_id (I), sender_len (H), sender, content_len (H), content
+          * for delete_message: count (B), then count * message_id (I)
+    """
+    if len(payload) < 1:
+        raise ValueError("empty push event payload")
+    event_type = struct.unpack("!B", payload[:1])[0]
+    data_bytes = payload[1:]
+    if event_type == EVENT_NEW_MESSAGE:
+        # new_message: id (I), sender_len (H), sender, content_len (H), content
+        if len(data_bytes) < 4 + 2:
+            raise ValueError("insufficient data for new_message event")
+        msg_id = struct.unpack("!I", data_bytes[:4])[0]
+        pos = 4
+        sender_len = struct.unpack("!H", data_bytes[pos:pos+2])[0]
+        pos += 2
+        if len(data_bytes) < pos + sender_len + 2:
+            raise ValueError("insufficient data for sender in new_message event")
+        sender = data_bytes[pos:pos+sender_len].decode("utf-8")
+        pos += sender_len
+        content_len = struct.unpack("!H", data_bytes[pos:pos+2])[0]
+        pos += 2
+        if len(data_bytes) < pos + content_len:
+            raise ValueError("insufficient data for content in new_message event")
+        content = data_bytes[pos:pos+content_len].decode("utf-8")
+        return {"event": "NEW_MESSAGE", "data": {"id": msg_id, "sender": sender, "content": content}}
+    elif event_type == EVENT_DELETE_MESSAGE:
+        # delete_message: count (B) then count * message_id (I)
+        if len(data_bytes) < 1:
+            raise ValueError("insufficient data for delete_message event")
+        count = struct.unpack("!B", data_bytes[:1])[0]
+        pos = 1
+        message_ids = []
+        for _ in range(count):
+            if len(data_bytes) < pos + 4:
+                raise ValueError("insufficient data for a message id in delete_message event")
+            msg_id = struct.unpack("!I", data_bytes[pos:pos+4])[0]
+            pos += 4
+            message_ids.append(msg_id)
+        return {"event": "DELETE_MESSAGE", "data": {"message_ids": message_ids}}
+    else:
+        raise ValueError(f"unknown push event type: {event_type}")
 
 def _decode_response_payload(payload: bytes, opcode=None) -> Dict[str, Any]:
     """
@@ -261,152 +313,112 @@ def _decode_response_payload(payload: bytes, opcode=None) -> Dict[str, Any]:
         "data": data
     }
 
-class JSONClient:
+class CustomProtocolClient:
     def __init__(self, host: str, port: int) -> None:
         self.host = host
         self.port = port
         self.username: Optional[str] = None
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.connect((host, port))
-        # Queue to pass synchronous responses back to request methods.
         self.response_queue = queue.Queue()
         self.running = True
-        # Start a dedicated listener thread.
         self.listener_thread = threading.Thread(target=self._listen, daemon=True)
         self.listener_thread.start()
 
     def _listen(self) -> None:
-        """
-        Continuously listens for incoming binary data from the socket.
-        Each message is prefixed by a fixed header:
-          - version (B), opcode (B), payload length (H).
-        The payload is then decoded using our binary response format.
-        If the decoded response’s data contains an "event" key, it is handled immediately;
-        otherwise, it is placed on the response queue.
-        """
         buffer = b""
-        header_size = struct.calcsize("!BBH")  # 1+1+2 = 4 bytes
+        header_size = struct.calcsize("!BBH")  # version (B), opcode (B), payload_len (H)
         while self.running:
             try:
                 data = self.sock.recv(4096)
                 if not data:
                     break  # connection closed
                 buffer += data
-                # Process as many complete messages as possible.
                 while len(buffer) >= header_size:
                     version, opcode, payload_len = struct.unpack("!BBH", buffer[:header_size])
                     if version != VERSION:
-                        raise ValueError("Protocol version mismatch")
+                        raise ValueError("protocol version mismatch")
                     if len(buffer) < header_size + payload_len:
-                        break  # Wait until full payload is received.
-                    payload = buffer[header_size:header_size+payload_len]
-                    buffer = buffer[header_size+payload_len:]
-                    response = _decode_response_payload(payload, opcode)
-                    # If the decoded response's data contains an "event" key, treat it as a push event.
-                    if isinstance(response.get("data"), dict) and "event" in response["data"]:
-                        self.handle_push_event(response["data"])
+                        break  # wait for full payload
+                    payload = buffer[header_size : header_size + payload_len]
+                    buffer = buffer[header_size + payload_len :]
+                    if opcode == 0:
+                        # push event
+                        event = decode_push_event(payload)
+                        self.handle_push_event(event)
                     else:
+                        response = _decode_response_payload(payload, opcode)
                         self.response_queue.put(response)
             except Exception as e:
                 print("Error in listener thread:", e)
                 break
 
     def handle_push_event(self, message: Dict[str, Any]) -> None:
-        """
-        Called from the listener thread when a push event arrives.
-        Update your GUI (or log the event) accordingly.
-        """
         event = message.get("event")
         data = message.get("data")
         if event == "NEW_MESSAGE":
             print(f"[PUSH] New message received: {data}")
+        elif event == "DELETE_MESSAGE":
+            print(f"[PUSH] Delete message event: {data}")
         else:
-            print(f"[PUSH] Unknown event received: {message}")
+            print(f"[PUSH] Unknown push event: {message}")
 
     def _send_request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Sends a request to the server using the binary protocol and waits for the corresponding response.
-        """
         action = payload.get("action")
         encoder = encoder_map.get(action)
-        if encoder is None:
-            raise ValueError(f"Unknown action: {action}")
+        if not encoder:
+            raise ValueError(f"unknown action: {action}")
         data = encoder(payload)
         self.sock.sendall(data)
-        # Block until a response (non-push) is available.
         response = self.response_queue.get()
         return response
 
+    # -- Public API methods --
     def login(self, username: str, password: str) -> str:
-        payload = {
-            "action": "LOGIN",
-            "username": username,
-            "password": password  # Note: The encoder will hash the password.
-        }
+        payload = {"action": "LOGIN", "username": username, "password": password}
         response = self._send_request(payload)
         if not response.get("success", False):
             raise Exception(response.get("message", "Login failed"))
         self.username = username
         return response.get("message", "")
 
-    def send_message(self, recipient: str, message: str) -> None:
-        if not self.username:
-            raise Exception("Not logged in")
-        payload = {
-            "action": "SEND_MESSAGE",
-            "recipient": recipient,
-            "message": message
-        }
-        response = self._send_request(payload)
-        if not response.get("success", False):
-            raise Exception(response.get("message", "Failed to send message"))
-        print("Message sent!")
-
-    def account_exists(self, username: str) -> bool:
-        payload = {
-            "action": "CHECK_USERNAME",
-            "username": username
-        }
-        response = self._send_request(payload)
-        return response.get("success", False)
-
     def create_account(self, username: str, password: str) -> None:
-        payload = {
-            "action": "CREATE_ACCOUNT",
-            "username": username,
-            "password": password  # Encoder will hash this.
-        }
+        payload = {"action": "CREATE_ACCOUNT", "username": username, "password": password}
         response = self._send_request(payload)
         if not response.get("success", False):
             raise Exception(response.get("message", "Account creation failed"))
         self.username = username
 
-    def list_accounts(self, pattern: str = "*", offset: int = 0, limit: int = 10) -> List[str]:
-        page_num = (offset // limit) + 1
-        payload = {
-            "action": "LIST_ACCOUNTS",
-            "page_size": limit,
-            "page_num": page_num,
-            "pattern": pattern
-        }
+    def delete_account(self) -> None:
+        payload = {"action": "DELETE_ACCOUNT"}
         response = self._send_request(payload)
         if not response.get("success", False):
-            raise Exception(response.get("message", "Failed to list accounts"))
-        accounts_data = response.get("data", {})
-        accounts = accounts_data.get("accounts", [])
-        if pattern and pattern != "*":
-            accounts = [acct for acct in accounts if pattern in acct]
-        return accounts
+            raise Exception(response.get("message", "Delete account failed"))
+        self.username = None
 
-    def read_messages(self, offset: int = 0, count: int = 10, to_user: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_accounts(self, pattern: str = "*", offset: int = 0, limit: int = 10) -> List[str]:
+        page_num = (offset // limit) + 1
+        payload = {"action": "LIST_ACCOUNTS", "page_size": limit, "page_num": page_num, "pattern": pattern}
+        response = self._send_request(payload)
+        if not response.get("success", False):
+            raise Exception(response.get("message", "List accounts failed"))
+        accounts_data = response.get("data", {})
+        return accounts_data.get("accounts", [])
+
+    def send_message(self, recipient: str, message: str) -> None:
+        if not self.username:
+            raise Exception("not logged in")
+        payload = {"action": "SEND_MESSAGE", "recipient": recipient, "message": message}
+        response = self._send_request(payload)
+        if not response.get("success", False):
+            raise Exception(response.get("message", "Failed to send message"))
+        print("Message sent!")
+
+    def read_messages(self, offset: int = 0, count: int = 10, to_user: Optional[str] = None
+                      ) -> List[Dict[str, Any]]:
         page_num = (offset // count) + 1
-        payload = {
-            "action": "READ_MESSAGES",
-            "page_size": count,
-            "page_num": page_num
-        }
-        if to_user:
-            payload["chat_partner"] = to_user
+        payload = {"action": "READ_MESSAGES", "page_size": count, "page_num": page_num}
+        payload["chat_partner"] = to_user if to_user else ''
         response = self._send_request(payload)
         if not response.get("success", False):
             raise Exception(response.get("message", "Failed to read messages"))
@@ -417,284 +429,69 @@ class JSONClient:
             return data.get("read_messages", [])
 
     def delete_message(self, message_id: int) -> None:
-        payload = {
-            "action": "DELETE_MESSAGE",
-            "message_ids": [message_id]
-        }
+        payload = {"action": "DELETE_MESSAGE", "message_ids": [message_id]}
         response = self._send_request(payload)
         if not response.get("success", False):
             raise Exception(response.get("message", "Failed to delete message"))
         print("Message deleted.")
 
-    def delete_account(self, username: str) -> None:
-        payload = {"action": "DELETE_ACCOUNT"}
+    def account_exists(self, username: str) -> bool:
+        payload = {"action": "CHECK_USERNAME", "username": username}
         response = self._send_request(payload)
-        if not response.get("success", False):
-            raise Exception(response.get("message", "Failed to delete account"))
-        self.username = None
+        return response.get("success", False)
 
     def close(self) -> None:
         self.running = False
         try:
-            op_type = OP_CODES_DICT["QUIT"]
-            self.sock.sendall(struct.pack("!BB", VERSION, op_type))
+            data = encode_quit({})
+            self.sock.sendall(data)
         except Exception:
             pass
         self.sock.close()
 
-    def _hash_password(self, password: str) -> str:
-        return hashlib.sha256(password.encode("utf-8")).hexdigest()
-
-
-class MockClient:
-    def __init__(self, host: str, port: int) -> None:
-        self.host = host
-        self.port = port
-        self.session_token = None
-        self.username: Optional[str] = None
-        self.accounts = {
-            "alice": "password",
-            "bob": "abc",
-            "natnael": "teshome",
-            "michal": "kurek",
-        }
-        self.messages = [
-            {
-                "id": 1,
-                "from": "alice",
-                "to": "michal",
-                "timestamp": 1739064990,
-                "content": "hey",
-            },
-            {
-                "id": 2,
-                "from": "bob",
-                "to": "michal",
-                "timestamp": 1739065050,
-                "content": "hello",
-            },
-            {
-                "id": 3,
-                "from": "alice",
-                "to": "michal",
-                "timestamp": 1739065110,
-                "content": "how r u?",
-            },
-            {
-                "id": 4,
-                "from": "michal",
-                "to": "alice",
-                "timestamp": 1739065170,
-                "content": "i'm good, u?",
-            },
-            {
-                "id": 5,
-                "from": "alice",
-                "to": "michal",
-                "timestamp": 1739065230,
-                "content": "doing alright",
-            },
-            {
-                "id": 6,
-                "from": "bob",
-                "to": "alice",
-                "timestamp": 1739065290,
-                "content": "nice to hear",
-            },
-            {
-                "id": 7,
-                "from": "michal",
-                "to": "bob",
-                "timestamp": 1739065350,
-                "content": "what's up?",
-            },
-            {
-                "id": 8,
-                "from": "bob",
-                "to": "michal",
-                "timestamp": 1739065410,
-                "content": "not much, just chilling",
-            },
-            {
-                "id": 9,
-                "from": "alice",
-                "to": "bob",
-                "timestamp": 1739065470,
-                "content": "same here",
-            },
-            {
-                "id": 10,
-                "from": "michal",
-                "to": "alice",
-                "timestamp": 1739065530,
-                "content": "wanna hang out later?",
-            },
-        ]
-
-    def account_exists(self, username: str) -> bool:
-        return username in self.accounts
-
-    def create_account(self, username: str, password: str) -> None:
-        if username in self.accounts:
-            raise Exception("username taken")
-        self.accounts[username] = password
-        self.session_token = "dummy_token"
-        self.username = username
-
-    def delete_account(self, username: str) -> None:
-        if username not in self.accounts:
-            raise Exception("account does not exist")
-        del self.accounts[username]
-
-    def login(self, username: str, password: str) -> int:
-        if username not in self.accounts:
-            raise Exception("account does not exist")
-        if self.accounts[username] != password:
-            raise Exception("bad password")
-        self.session_token = "dummy_token"
-        self.username = username
-        unread_count = len([m for m in self.messages if m["to"] == username])
-        return unread_count
-
-    def list_accounts(
-        self, pattern: str = "*", offset: int = 0, limit: int = 10
-    ) -> List[str]:
-        accounts = list(self.accounts.keys())
-        if pattern != "*" and pattern:
-            accounts = [acct for acct in accounts if pattern in acct]
-        return accounts[offset : offset + limit]
-
-    def read_messages(
-        self, offset: int = 0, count: int = 10, to_user: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        if to_user:
-            result = [
-                msg
-                for msg in self.messages
-                if (
-                    (msg["to"] == self.username and msg["from"] == to_user)
-                    or (msg["from"] == self.username and msg["to"] == to_user)
-                )
-            ]
-        else:
-            result = [
-                msg
-                for msg in self.messages
-                if msg["to"] == self.username or msg["from"] == self.username
-            ]
-        return result[offset : offset + count]
-
-    def send_message(self, recipient: str, message: str) -> None:
-        if not self.session_token:
-            raise Exception("not logged in")
-        new_msg = {
-            "id": len(self.messages) + 1,
-            "from": self.username if self.username else "unknown",
-            "to": recipient,
-            "timestamp": int(datetime.now().timestamp()),
-            "content": message,
-        }
-        self.messages.append(new_msg)
-
-    def delete_message(self, message_id: int) -> None:
-        for msg in self.messages:
-            if msg["id"] == message_id:
-                self.messages.remove(msg)
-                return
-        raise Exception("message not found")
-
-
 
 if __name__ == "__main__":
-    import socket
-    import struct
-    import sys
-
-    def recvall(sock, n):
-        data = b""
-        while len(data) < n:
-            packet = sock.recv(n - len(data))
-            if not packet:
-                break
-            data += packet
-        return data
-
-    def send_request(sock, data):
-        sock.sendall(data)
-        header_size = struct.calcsize("!BBH")
-        header = recvall(sock, header_size)
-        if len(header) < header_size:
-            raise Exception("incomplete header received")
-        version, opcode, payload_len = struct.unpack("!BBH", header)
-        payload = recvall(sock, payload_len)
-        return _decode_response_payload(payload, opcode)
-
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.connect(("localhost", 12345))
-    print("connected to server @ localhost:12345")
+    client = CustomProtocolClient("localhost", 12345)
     try:
         while True:
             cmd = input("cmd> ").strip().lower()
             if cmd == "login":
                 username = input("username: ").strip()
                 password = input("password: ").strip()
-                data = encode_login({"username": username, "password": password})
-                resp = send_request(s, data)
-                print(resp)
+                print(client.login(username, password))
             elif cmd == "create_account":
                 username = input("username: ").strip()
                 password = input("password: ").strip()
-                data = encode_create_account({"username": username, "password": password})
-                resp = send_request(s, data)
-                print(resp)
+                client.create_account(username, password)
+                print("account created!")
             elif cmd == "delete_account":
-                data = encode_delete_account()
-                resp = send_request(s, data)
-                print(resp)
+                client.delete_account()
+                print("account deleted!")
             elif cmd == "list_accounts":
                 pattern = input("pattern (default '*'): ").strip() or "*"
                 offset = int(input("offset (default 0): ").strip() or "0")
                 limit = int(input("limit (default 10): ").strip() or "10")
-                page_num = (offset // limit) + 1
-                data = encode_list_accounts({
-                    "page_size": limit,
-                    "page_num": page_num,
-                    "pattern": pattern,
-                })
-                resp = send_request(s, data)
-                print(resp)
+                accounts = client.list_accounts(pattern, offset, limit)
+                print("accounts:", accounts)
             elif cmd == "send_message":
                 recipient = input("recipient: ").strip()
                 message = input("message: ").strip()
-                data = encode_send_message({
-                    "recipient": recipient,
-                    "message": message,
-                })
-                resp = send_request(s, data)
-                print(resp)
+                client.send_message(recipient, message)
             elif cmd == "read_messages":
                 offset = int(input("offset (default 0): ").strip() or "0")
                 count = int(input("count (default 10): ").strip() or "10")
                 partner = input("chat partner (leave blank for all): ").strip()
-                payload = {"page_size": count, "page_num": (offset // count) + 1}
-                if partner:
-                    payload["chat_partner"] = partner
-                data = encode_read_messages(payload)
-                resp = send_request(s, data)
-                print(resp)
+                msgs = client.read_messages(offset, count, partner if partner else None)
+                print("messages:", msgs)
             elif cmd == "delete_message":
                 msg_id = int(input("message id: ").strip())
-                data = encode_delete_message({"message_ids": [msg_id]})
-                resp = send_request(s, data)
-                print(resp)
+                client.delete_message(msg_id)
             elif cmd == "check_username":
                 username = input("username: ").strip()
-                data = encode_check_username({"username": username})
-                resp = send_request(s, data)
-                print(resp)
+                exists = client.account_exists(username)
+                print(f"username {'exists' if exists else 'does not exist'}")
             elif cmd == "quit":
-                data = encode_quit()
-                send_request(s, data)
+                client.close()
                 print("bye")
                 break
             else:
@@ -703,5 +500,4 @@ if __name__ == "__main__":
     except Exception as e:
         print("error:", e)
     finally:
-        s.close()
-        sys.exit(0)
+        client.close()
