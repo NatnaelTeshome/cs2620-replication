@@ -67,7 +67,7 @@ def encode_list_accounts(payload) -> bytes:
 
 def encode_send_message(payload) -> bytes:
     op_code = OP_CODES_DICT["SEND_MESSAGE"]
-    recipient = payload.get("recipient")
+    recipient = payload.get("to")
     message = payload.get("message")
     recipient_bytes = recipient.encode("utf-8")
     message_bytes = message.encode("utf-8")
@@ -190,7 +190,17 @@ def decode_data_bytes(data_bytes: bytes, opcode=None) -> any:
                 pos += content_len
                 read_flag = struct.unpack("!B", payload[pos:pos+1])[0]
                 pos += 1
-                messages.append({"id": msg_id, "content": content, "read": bool(read_flag)})
+                # Read timestamp (unsignet int, 4 bytes, for a UNIX timestamp)
+                if len(payload) < pos + 4:
+                    raise ValueError("insufficient data for timestamp")
+                timestamp = struct.unpack("!I", payload[pos:pos+4])[0]
+                pos += 4
+                messages.append({
+                    "id": msg_id,
+                    "content": content,
+                    "read": bool(read_flag),
+                    "timestamp": timestamp
+                })
             return {"conversation_with": conv_with, "page_num": page_num,
                     "page_size": page_size, "total_msgs": total_msgs,
                     "remaining": remaining, "messages": messages}
@@ -222,10 +232,25 @@ def decode_data_bytes(data_bytes: bytes, opcode=None) -> any:
                 pos += content_len
                 read_flag = struct.unpack("!B", payload[pos:pos+1])[0]
                 pos += 1
-                messages.append({"id": msg_id, "sender": sender, "content": content,
-                                 "read": bool(read_flag)})
+                # read UNIX timestamp (unsigned int)
+                if len(payload) < pos + 4:
+                    raise ValueError("insufficient data for timestamp")
+                timestamp = struct.unpack("!I", payload[pos:pos+4])[0]
+                pos += 4
+                messages.append({
+                    "id": msg_id,
+                    "from": sender,
+                    "content": content,
+                    "read": bool(read_flag),
+                    "timestamp": timestamp
+                })
             return {"total_unread": total_unread, "remaining_unread": remaining_unread,
                     "read_messages": messages}
+    elif opcode == OP_CODES_DICT["SEND_MESSAGE"]:
+        if len(data_bytes) < 4:
+            raise ValueError("insufficient data for message id")
+        msg_id = struct.unpack("!I", data_bytes[:4])[0]
+        return {"id": msg_id}
     else:
         # fallback to json decode.
         return json.loads(data_bytes.decode("utf-8"))
@@ -260,7 +285,12 @@ def decode_push_event(payload: bytes) -> dict:
         if len(data_bytes) < pos + content_len:
             raise ValueError("insufficient data for content in new_message event")
         content = data_bytes[pos:pos+content_len].decode("utf-8")
-        return {"event": "NEW_MESSAGE", "data": {"id": msg_id, "sender": sender, "content": content}}
+        pos += content_len
+        # decode timestamp (unsigned int 4 bytes)
+        if len(data_bytes) < pos + 4:
+            raise ValueError("insufficient data for timestamp in new_message event")
+        timestamp = struct.unpack("!I", data_bytes[pos:pos+4])[0]
+        return {"event": "NEW_MESSAGE", "data": {"id": msg_id, "from": sender, "content": content, "timestamp": timestamp}}
     elif event_type == EVENT_DELETE_MESSAGE:
         # delete_message: count (B) then count * message_id (I)
         if len(data_bytes) < 1:
@@ -314,13 +344,17 @@ def _decode_response_payload(payload: bytes, opcode=None) -> Dict[str, Any]:
     }
 
 class CustomProtocolClient:
-    def __init__(self, host: str, port: int) -> None:
+    def __init__(self, host: str, port: int,
+                 on_msg_callback = None,
+                 on_delete_callback = None) -> None:
         self.host = host
         self.port = port
         self.username: Optional[str] = None
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.connect((host, port))
         self.response_queue = queue.Queue()
+        self.on_msg_callback = on_msg_callback
+        self.on_delete_callback = on_delete_callback
         self.running = True
         self.listener_thread = threading.Thread(target=self._listen, daemon=True)
         self.listener_thread.start()
@@ -358,8 +392,12 @@ class CustomProtocolClient:
         data = message.get("data")
         if event == "NEW_MESSAGE":
             print(f"[PUSH] New message received: {data}")
+            if self.on_msg_callback:
+                self.on_msg_callback(data)
         elif event == "DELETE_MESSAGE":
             print(f"[PUSH] Delete message event: {data}")
+            if self.on_delete_callback:
+                self.on_delete_callback(data)
         else:
             print(f"[PUSH] Unknown push event: {message}")
 
@@ -405,14 +443,16 @@ class CustomProtocolClient:
         accounts_data = response.get("data", {})
         return accounts_data.get("accounts", [])
 
-    def send_message(self, recipient: str, message: str) -> None:
+    def send_message(self, recipient: str, message: str) -> int:
         if not self.username:
             raise Exception("not logged in")
-        payload = {"action": "SEND_MESSAGE", "recipient": recipient, "message": message}
+        payload = {"action": "SEND_MESSAGE", "to": recipient, "message": message}
         response = self._send_request(payload)
         if not response.get("success", False):
             raise Exception(response.get("message", "Failed to send message"))
-        print("Message sent!")
+        id = response.get("data", {}).get("id", -1)
+        print(f"Message sent! Got ID: {id}")
+        return id
 
     def read_messages(self, offset: int = 0, count: int = 10, to_user: Optional[str] = None
                       ) -> List[Dict[str, Any]]:
@@ -452,6 +492,7 @@ class CustomProtocolClient:
 
 
 if __name__ == "__main__":
+    """For testing purposes only!"""
     client = CustomProtocolClient("localhost", 12345)
     try:
         while True:
@@ -485,7 +526,7 @@ if __name__ == "__main__":
                 msgs = client.read_messages(offset, count, partner if partner else None)
                 print("messages:", msgs)
             elif cmd == "delete_message":
-                msg_id = int(input("message id: ").strip())
+                msg_id = int(input("message id: ").strip() or "-1")
                 client.delete_message(msg_id)
             elif cmd == "check_username":
                 username = input("username: ").strip()

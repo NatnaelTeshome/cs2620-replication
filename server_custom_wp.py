@@ -7,6 +7,8 @@ import struct
 import fnmatch
 import shelve
 
+from datetime import datetime
+
 logging.basicConfig(level=logging.DEBUG,
                     format='[%(asctime)s] [%(levelname)s] %(message)s')
 
@@ -14,11 +16,10 @@ with open("config.json", "r") as file:
     try:
         config = json.load(file)
     except Exception as e:
-        print(e)
         logging.error(f"failed to load config: {e}")
         config = {}
 
-HOST = config.get("HOST", "localhost")
+HOST = config.get("HOST", str(socket.gethostbyname(socket.gethostname())))
 PORT = config.get("PORT", 12345)
 
 # --- Persistent storage using shelve ---
@@ -95,9 +96,11 @@ def encode_conversation_data(data: dict) -> bytes:
         content = msg.get("content", "")
         content_bytes = content.encode("utf-8")
         read_flag = 1 if msg.get("read", False) else 0
+        timestamp = msg.get("timestamp", 0)
         result += struct.pack("!I", msg_id)
         result += struct.pack("!H", len(content_bytes)) + content_bytes
         result += struct.pack("!B", read_flag)
+        result += struct.pack("!I", timestamp)
     return result
 
 def encode_unread_data(data: dict) -> bytes:
@@ -110,15 +113,17 @@ def encode_unread_data(data: dict) -> bytes:
     for msg in messages:
         logging.debug(f"Encoding message: {msg}")
         msg_id = msg.get("id", 0)
-        sender = msg.get("sender", "")
+        sender = msg.get("from", "")
         sender_bytes = sender.encode("utf-8")
         content = msg.get("content", "")
         content_bytes = content.encode("utf-8")
         read_flag = 1 if msg.get("read", False) else 0
+        timestamp = msg.get("timestamp", 0)
         result += struct.pack("!I", msg_id)
         result += struct.pack("!H", len(sender_bytes)) + sender_bytes
         result += struct.pack("!H", len(content_bytes)) + content_bytes
         result += struct.pack("!B", read_flag)
+        result += struct.pack("!I", timestamp)
     return result
 
 def encode_response_bin(success: bool, message: str = "",
@@ -141,13 +146,14 @@ def encode_event(event_type: int, data_bytes: bytes) -> bytes:
 
 def encode_new_message_event(data: dict) -> bytes:
     msg_id = data.get("id", 0)
-    sender = data.get("sender", "")
+    sender = data.get("from", "")
     content = data.get("content", "")
+    timestamp = data.get("timestamp", 0)
     sender_bytes = sender.encode("utf-8")
     content_bytes = content.encode("utf-8")
-    fmt = f"!I H{len(sender_bytes)}s H{len(content_bytes)}s"
+    fmt = f"!I H{len(sender_bytes)}s H{len(content_bytes)}s I"
     return struct.pack(fmt, msg_id, len(sender_bytes), sender_bytes,
-                       len(content_bytes), content_bytes)
+                       len(content_bytes), content_bytes, timestamp)
 
 def encode_delete_message_event(data: dict) -> bytes:
     msg_ids = data.get("message_ids", [])
@@ -216,7 +222,7 @@ def decode_message_from_buffer(buffer: bytes):
         message_bytes = buffer[pos+2: pos+2+message_len]
         total_consumed = pos + 2 + message_len
         req["action"] = "SEND_MESSAGE"
-        req["recipient"] = recipient_bytes.decode("utf-8")
+        req["to"] = recipient_bytes.decode("utf-8")
         req["content"] = message_bytes.decode("utf-8")
         return req, total_consumed
 
@@ -420,6 +426,8 @@ class ChatServer:
                 data_bytes = encode_conversation_data(data)
             elif "read_messages" in data and "total_unread" in data:
                 data_bytes = encode_unread_data(data)
+            elif set(data.keys()) == {"id"}:
+                data_bytes = struct.pack("!I", data["id"])
             else:
                 logging.error("Something went wrong. Fallback: encoding data as JSON.")
                 data_bytes = json.dumps(data).encode("utf-8")
@@ -574,7 +582,7 @@ class ChatServer:
             logging.warning(f"handle_send failed: not logged in {client_state.addr}")
             return
         sender = client_state.current_user
-        recipient = request.get("recipient", "")
+        recipient = request.get("to", "")
         content = request.get("content", "").strip()
         if not recipient or not content:
             self.send_response(client_state, success=False, message="recipient or content missing.",
@@ -589,21 +597,31 @@ class ChatServer:
         global global_message_id
         global_message_id += 1
         msg_id = global_message_id
-        new_msg = {"id": msg_id, "sender": sender, "content": content, "read": False}
+        new_msg = {"id": msg_id, "from": sender, "to": recipient,
+                   "content": content, "read": False, "timestamp": int(datetime.now().timestamp())}
         accounts[recipient]["messages"].append(new_msg)
         if sender not in accounts[recipient]["conversations"]:
             accounts[recipient]["conversations"][sender] = []
         accounts[recipient]["conversations"][sender].append(
             {"id": msg_id, "content": content, "read": False}
         )
+
+        # Store the message in our ID to msg mapping
+        id_to_message[msg_id] = new_msg
+
+        # Acknowledge to the sender
         self.send_response(client_state, success=True,
-                           message=f"message sent to '{recipient}': {content}",
+                           data={"id": msg_id},
                            req_opcode=req_opcode)
         logging.info(f"user '{sender}' sent message id {msg_id} to '{recipient}'")
+
+        # If recipient is logged in, push a notification to them
         recipient_state = self.logged_in_users.get(recipient)
         if recipient_state:
             self.push_event(recipient_state, "NEW_MESSAGE",
-                            {"id": msg_id, "sender": sender, "content": content})
+                            {"id": msg_id, "from": sender,
+                             "content": content,
+                             "timestamp": int(datetime.now().timestamp())})
             logging.info(f"pushed new message event to '{recipient}'")
         persist_data()
 
@@ -651,7 +669,7 @@ class ChatServer:
                 m["read"] = True
             conversations = accounts[username].get("conversations", {})
             for msg in to_read:
-                snd = msg["sender"]
+                snd = msg["from"]
                 if snd in conversations:
                     for conv_msg in conversations[snd]:
                         if conv_msg["id"] == msg["id"]:
@@ -708,7 +726,7 @@ class ChatServer:
             if user in accounts:
                 recipient_state = self.logged_in_users.get(user)
                 if recipient_state:
-                    self.push_event(recipient_state, "DELETE_MESSAGE", {"ids": message_ids})
+                    self.push_event(recipient_state, "DELETE_MESSAGE", {"message_ids": message_ids})
                     logging.info(f"pushed DELETE_MESSAGE event to '{user}'")
             else:
                 logging.error("cannot delete message for non-existent user %s", user)

@@ -6,6 +6,7 @@ import logging
 import argparse
 
 from client import JSONClient, MockClient
+from client_custom_wp import CustomProtocolClient
 
 USER_COLORS = [
     "#1f77b4",  # a cool blue
@@ -641,7 +642,7 @@ class chatapp(tk.Tk):
     def on_delete_request(self, data) -> None:
         # remove messages with matching ids from cache
         logging.debug("Cache before: %s", str(self.message_cache))
-        self.message_cache = [m for m in self.message_cache if m["id"] not in data.get("ids", [])]
+        self.message_cache = [m for m in self.message_cache if m["id"] not in data.get("message_ids", [])]
         logging.debug("Cache after: %s", str(self.message_cache))
         self.update_messages_area()
 
@@ -768,7 +769,7 @@ if __name__ == "__main__":
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     logging.info("starting chat application")
-    app = chatapp(JSONClient, "localhost", 12345)
+    app = chatapp(CustomProtocolClient, "localhost", 12345)
     app.mainloop()
     logging.info("chat application closed")
 
