@@ -6,7 +6,9 @@ import hashlib
 from typing import Optional, Dict, Any, List
 
 class JSONClient:
-    def __init__(self, host: str, port: int, on_msg_callback = None) -> None:
+    def __init__(self, host: str, port: int,
+                 on_msg_callback = None,
+                 on_delete_callback = None) -> None:
         self.host = host
         self.port = port
         self.username: Optional[str] = None
@@ -17,6 +19,8 @@ class JSONClient:
         self.running = True
         # Function called when server notifies us of new pending messages
         self.on_msg_callback = on_msg_callback
+        # Function called when server notifies us of new pending deletes
+        self.on_delete_callback = on_delete_callback
 
         # Start a dedicated listener thread.
         self.listener_thread = threading.Thread(
@@ -62,10 +66,12 @@ class JSONClient:
         data = message.get("data")
         if event == "NEW_MESSAGE":
             print(f"[PUSH] New message received: {data}")
-            # If using a GUI framework, you might want to schedule an update
-            # on the main thread here, e.g., via signals/slots in PyQt or Tkinter's after().
             if self.on_msg_callback:
                 self.on_msg_callback(data)
+        elif event == "DELETE_MESSAGE":
+            print(f"[PUSH] Message deletion request received: {data}")
+            if self.on_delete_callback:
+                self.on_delete_callback(data)
         else:
             print(f"[PUSH] Unknown event received: {message}")
 
@@ -92,18 +98,22 @@ class JSONClient:
         self.username = username
         return response.get("message", "")
 
-    def send_message(self, recipient: str, message: str) -> None:
+    def send_message(self, recipient: str, message: str) -> int:
+        """Sends message to specified recipient. On success, returns message id
+        assigned by server, or -1 on failure. """
         if not self.username:
             raise Exception("Not logged in")
         payload = {
             "action": "SEND",
-            "recipient": recipient,
+            "to": recipient,
             "content": message
         }
         response = self._send_request(payload)
         if not response.get("success", False):
             raise Exception(response.get("message", "Failed to send message"))
-        print("Message sent!")
+        id = response.get("data", {}).get("id", -1)
+        print(f"Message sent! Got ID: {id}")
+        return id
 
     def account_exists(self, username: str) -> bool:
         payload = {

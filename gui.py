@@ -210,7 +210,7 @@ class message_line(tk.Frame):
 
         timestamp = datetime.fromtimestamp(msg_data.get("timestamp", 0)).strftime("%Y-%m-%d %H:%M:%S")
         sender = msg_data.get("from", "unknown")
-        content = msg_data.get("content", "")
+        content = msg_data.get("content", "[ERROR] No message content")
         message_text = f"[{timestamp}] {sender}: {content}"
 
         self.text_label = tk.Label(self, text=message_text, anchor="w", fg=user_color)
@@ -252,7 +252,9 @@ class chatapp(tk.Tk):
         super().__init__()
         self.title("(c)hatsystem2620")
         self.geometry("800x600")
-        self.client: client = client(host, port, self.on_new_message)
+        self.client: client = client(host, port,
+                                     self.on_new_message,
+                                     self.on_delete_request)
 
         self.current_user: Optional[str] = None
         self.selected_account: Optional[str] = None
@@ -536,8 +538,15 @@ class chatapp(tk.Tk):
         logging.debug("main chat frame created; loading accounts and messages")
         self.update_accounts_list()
         try:
-            # initial full fetch to cache messages
-            self.message_cache = self.client.read_messages(0, 10000)
+            # initial full fetch to cache messages (read unread)
+            unread_messages = self.client.read_messages(0, 100)
+
+            # merge unread messages with existing cache
+            merged_messages = {m['id']: m for m in unread_messages}
+            merged_messages.update({m['id']: m for m in self.message_cache})
+
+            # update the message cache with merged messages
+            self.message_cache = list(merged_messages.values())
         except Exception as e:
             logging.error("failed to load initial messages: %s", e)
             messagebox.showerror("error", f"failed to load messages: {e}")
@@ -587,6 +596,15 @@ class chatapp(tk.Tk):
             color = self.get_user_color(self.selected_account)
             self.selected_user_label.config(text=self.selected_account, fg=color)
             self.message_offset = 0
+            # initial full fetch to cache messages (read unread)
+            unread_messages = self.client.read_messages(0, 100)
+
+            # merge unread messages with existing cache
+            merged_messages = {m['id']: m for m in unread_messages}
+            merged_messages.update({m['id']: m for m in self.message_cache})
+
+            # update the message cache with merged messages
+            self.message_cache = list(merged_messages.values())
             self.update_messages_area()
         else:
             self.selected_account = None
@@ -622,10 +640,18 @@ class chatapp(tk.Tk):
             self.message_cache.append(msg)
             self.update_messages_area()
 
+    def on_delete_request(self, data) -> None:
+        # remove messages with matching ids from cache
+        logging.debug("Cache before: %s", str(self.message_cache))
+        self.message_cache = [m for m in self.message_cache if m["id"] not in data.get("ids", [])]
+        logging.debug("Cache after: %s", str(self.message_cache))
+        self.update_messages_area()
+
     def prev_messages_page(self) -> None:
         if self.message_offset >= self.message_page_size:
             self.message_offset -= self.message_page_size
             logging.debug("navigating to previous messages page, new offset %d", self.message_offset)
+            self
             self.update_messages_area()
 
     def next_messages_page(self) -> None:
@@ -643,9 +669,8 @@ class chatapp(tk.Tk):
         if not content:
             return
         try:
-            self.client.send_message(self.selected_account, content)
+            new_id = self.client.send_message(self.selected_account, content)
             logging.info("message sent to '%s'", self.selected_account)
-            new_id = max((msg["id"] for msg in self.message_cache), default=0) + 1
             new_msg = {
                 "id": new_id,
                 "from": self.current_user,

@@ -18,7 +18,32 @@ with open("config.json", "r") as file:
 HOST = config.get("HOST", "localhost")
 PORT = config.get("PORT", 12345)
 
+# Account structure includes both 'messages' and 'conversations' ===
+# accounts = {
+#   "alice": {
+#       "password_hash": "...",
+#       "messages": [  # all incoming messages for 'alice'
+#           {"id": 1, "from": "bob", "to": "alice", "content": "Hello", "read": False},
+#           {"id": 2, "from": "charlie", "to": "bob", content": "Hi there", "read": True},
+#           ...
+#       ],
+#       "conversations": {  # same messages, but grouped by 'from'
+#           "bob": [
+#               {"id": 1, "content": "Hello", "read": False}
+#               ...
+#           ],
+#           "charlie": [...],
+#           ...
+#       }
+#   },
+#   ...
+# }
 accounts = {}
+
+# Maps message IDs to messages
+id_to_message = {}
+
+# Global counter used for message ID generation
 global_message_id = 0
 
 def get_unread_count(username):
@@ -67,7 +92,7 @@ class ChatServer:
         self.selector = selectors.DefaultSelector()
         logging.debug(f"chatserver initialized on {host}:{port}")
 
-        # NEW: Keep track of which users are currently logged in.
+        # Keep track of which users are currently logged in.
         # Maps username -> ClientState
         self.logged_in_users = {}
 
@@ -345,7 +370,7 @@ class ChatServer:
             return
 
         sender = client_state.current_user
-        recipient = request.get("recipient", "")
+        recipient = request.get("to", "")
         content = request.get("content", "").strip()
 
         if not recipient or not content:
@@ -357,7 +382,7 @@ class ChatServer:
         if recipient not in accounts:
             self.send_response(client_state, success=False,
                                message="Recipient does not exist.")
-            logging.warning(f"handle_send failed: recipient '{recipient}' does not exist from {client_state.addr}")
+            logging.warning(f"handle_send failed: recipient '{to}' does not exist from {client_state.addr}")
             return
 
         global global_message_id
@@ -368,6 +393,7 @@ class ChatServer:
         new_msg = {
             "id": msg_id,
             "from": sender,
+            "to": recipient,
             "content": content,
             "read": False
         }
@@ -382,12 +408,16 @@ class ChatServer:
             "read": False
         })
 
+        # 3) Finally, store in our ID to MSG mapping for O(1) lookups
+        id_to_message[msg_id] = new_msg
+
         # Acknowledge to the sender
         self.send_response(client_state, success=True,
-                           message=f"Message sent to '{recipient}': {content}")
+                           message=f"Message sent to '{recipient}': {content}",
+                           data={'id':msg_id})
         logging.info(f"user '{sender}' sent message id {msg_id} to '{recipient}'")
 
-        # NEW: If the recipient is logged in, push a notification
+        # If the recipient is logged in, push a notification
         recipient_state = self.logged_in_users.get(recipient)
         if recipient_state:
             self.push_event(
@@ -492,7 +522,79 @@ class ChatServer:
             )
             logging.info(f"user '{username}' read {len(to_read)} messages (unread)")
 
-    def handle_delete_message(self, client_state, request):
+    def handle_delete_message(self, client_state, request) -> None:
+        """
+        Handles book-keeping of deleted messages on the server side,
+        as well as notifies affected users (sender/recipient) of message deletion
+        """
+        if client_state.current_user is None:
+            self.send_response(client_state, success=False, message="please log in first.")
+            logging.warning(f"handle_delete_message failed: not logged in {client_state.addr}")
+            return
+
+        username = client_state.current_user
+        message_ids = request.get("message_ids", [])
+        if not isinstance(message_ids, list):
+            message_ids = [message_ids]
+
+        # find affected users efficiently
+        affected_users = set()
+        for msg_id in message_ids:
+            msg = id_to_message.get(msg_id)
+            if msg:
+                affected_users.add(msg["from"])
+                affected_users.add(msg["to"])
+
+        affected_users.discard(username)
+        logging.debug("message ids %s deleted. will notify users: %s", str(message_ids), str(affected_users))
+
+        # remove messages from id_to_message and user's message list
+        user_msgs = accounts.get(username, {}).get("messages", [])
+        if isinstance(user_msgs, list):
+            accounts[username]["messages"] = [m for m in user_msgs if m["id"] not in message_ids]
+
+        for msg_id in message_ids:
+            msg_obj = id_to_message.get(msg_id)
+            if not msg_obj:
+                logging.error("Message with ID %s doesn't exist?", str(msg_id))
+                continue
+
+            receiver = msg_obj["to"]
+
+            # remove from receiver's message list
+            receiver_msgs = accounts.get(receiver, {}).get("messages", [])
+            if isinstance(receiver_msgs, list):
+                accounts[receiver]["messages"] = [m for m in receiver_msgs if m["id"] not in message_ids]
+
+            # remove from receiver's conversations
+            receiver_conversations = accounts.get(receiver, {}).get("conversations", {})
+            sender = msg_obj["from"]
+            if sender in receiver_conversations and isinstance(receiver_conversations[sender], list):
+                receiver_conversations[sender] = [m for m in receiver_conversations[sender] if m["id"] not in message_ids]
+
+            # finally, remove from global lookup
+            id_to_message.pop(msg_id, None)
+
+        # also remove from conversations
+        conversations = accounts[username]["conversations"]
+        for partner in conversations:
+            conversations[partner] = [m for m in conversations[partner] if m["id"] not in message_ids]
+
+        # notify affected users
+        for user in affected_users:
+            if user in accounts:
+                recipient_state = self.logged_in_users.get(user)
+                if recipient_state:
+                    self.push_event(recipient_state, "DELETE_MESSAGE", {"ids": message_ids})
+                    logging.info(f"pushed DELETE_MESSAGE event to '{user}'")
+            else:
+                logging.error("cannot delete message for non-existent user %s", user)
+
+        msg = f"deleted {len(message_ids)} messages."
+        self.send_response(client_state, success=True, message=msg)
+        logging.info(f"user '{username}' deleted {len(message_ids)} messages")
+
+    def deprecated_handle_delete_message(self, client_state, request):
         if client_state.current_user is None:
             self.send_response(client_state, success=False,
                                message="Please log in first.")
@@ -507,6 +609,19 @@ class ChatServer:
         user_msgs = accounts[username]["messages"]
         before_count = len(user_msgs)
 
+        # Before removing messages, find all affected users.
+        # This is needed to notify them of the deletion
+        affected_users = set()
+        for msg in user_msgs:
+            # TODO: We should instead have a table / hashmap
+            # that directly maps IDs to messages, instead of
+            # having to perform a linear scan
+            if msg["id"] in message_ids:
+                affected_users.add(msg["from"])
+                affected_users.add(msg["to"])
+        affected_users.discard(username)
+        logging.debug("Message ids %s deleted. Will notify users: %s", str(message_ids), str(affected_users))
+
         # Remove from 'messages'
         new_msgs = [m for m in user_msgs if m["id"] not in message_ids]
         after_count = len(new_msgs)
@@ -517,6 +632,24 @@ class ChatServer:
         for partner, msg_list in conversations.items():
             new_list = [m for m in msg_list if m["id"] not in message_ids]
             conversations[partner] = new_list
+
+        # Notify affected users
+        for user in affected_users:
+            if user in accounts:
+                recipient_state = self.logged_in_users.get(user, None)
+                if not recipient_state:
+                    # We don't notify users that are not currently logged in
+                    continue
+                self.push_event(
+                    recipient_state,
+                    "DELETE_MESSAGE",
+                    {
+                        "ids": message_ids,
+                    }
+                )
+                logging.info(f"pushed DELETE_MESSAGE event to '{user}'")
+            else:
+                logging.error("Cannot delete message for non-existent user %s", user)
 
         deleted_count = before_count - after_count
         msg = f"Deleted {deleted_count} messages."
