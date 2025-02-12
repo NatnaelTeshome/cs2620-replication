@@ -34,6 +34,13 @@ OP_CODES_DICT = {
 }
 REVERSED_OP_CODES_DICT = {v: k for k, v in OP_CODES_DICT.items()}
 
+OP_CODES_SEND_RESPONSE_DICT = {
+    "LIST_ACCOUNTS": 0,
+    "READ_PARTNER": 1,
+    "READ_GENERAL": 2
+}
+
+
 
 import struct
 import json
@@ -150,7 +157,7 @@ def encode_unread_data(data: dict) -> bytes:
         result += struct.pack("!B", read_flag)
     return result
 
-def encode_response_bin(success: bool, message: str = "", data_bytes: bytes = b"") -> bytes:
+def encode_response_bin(success: bool, message: str = "", data_bytes: bytes = b"", op_name: str = "") -> bytes:
     """
     Encode a response in binary format.
     
@@ -168,7 +175,8 @@ def encode_response_bin(success: bool, message: str = "", data_bytes: bytes = b"
     message_bytes = message.encode("utf-8") if message else b""
     payload = struct.pack(f"!B H {len(message_bytes)}s H", success_byte, len(message_bytes), message_bytes, len(data_bytes))
     payload += data_bytes
-    header = struct.pack("!BBH", VERSION, 0, len(payload))
+    op_code = OP_CODES_SEND_RESPONSE_DICT[op_name]
+    header = struct.pack("!BBH", VERSION, op_code, len(payload))
     return header + payload
 
 def get_unread_count(username):
@@ -494,19 +502,23 @@ class ChatServer:
         
         Otherwise, data is encoded as JSON (fallback).
         """
+        op_name = ""
         if data is not None:
             if "total_accounts" in data and "accounts" in data:
                 data_bytes = encode_list_accounts_data(data)
+                op_name = "LIST_ACCOUNTS"
             elif "conversation_with" in data and "messages" in data:
                 data_bytes = encode_conversation_data(data)
+                op_name = "READ_PARTNER"
             elif "read_messages" in data and "total_unread" in data:
                 data_bytes = encode_unread_data(data)
+                op_name = "READ_GENERAL"
             else:
                 # Fallback: encode data as JSON bytes.
                 data_bytes = json.dumps(data).encode("utf-8")
         else:
             data_bytes = b""
-        response_bytes = encode_response_bin(success, message, data_bytes)
+        response_bytes = encode_response_bin(success, message, data_bytes, op_name)
         client_state.queue_message(response_bytes)
         logging.debug(f"response sent to {client_state.addr}: success={success}, message='{message}', data_bytes={data_bytes}")
 

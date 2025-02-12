@@ -20,6 +20,14 @@ OP_CODES_DICT = {
     "QUIT": 9
 }
 
+OP_CODES_SEND_RESPONSE_DICT = {
+    "LIST_ACCOUNTS": 0,
+    "READ_PARTNER": 1,
+    "READ_GENERAL": 2
+}
+
+REVERSED_OP_CODES_SEND_RESPONSE_DICT = {v: k for k, v in OP_CODES_SEND_RESPONSE_DICT.items()}
+
 def encode_login(payload) -> bytes:
     op_code = OP_CODES_DICT["LOGIN"]
     username = payload.get("username")
@@ -125,117 +133,105 @@ encoder_map = {
 # Helper to decode the binary-encoded data part of a response.
 # We try to decode as one of the known structures.
 # ---------------------------------------------------------------------------
-def decode_data_bytes(data_bytes: bytes) -> Any:
+def decode_data_bytes(data_bytes: bytes, op_code=None) -> Any:
     # Try to decode as list_accounts data:
-    try:
-        if len(data_bytes) >= 6:
-            # Unpack total_accounts (I) and account_count (H)
-            total_accounts = struct.unpack("!I", data_bytes[:4])[0]
-            account_count = struct.unpack("!H", data_bytes[4:6])[0]
-            pos = 6
-            accounts = []
-            for i in range(account_count):
-                if len(data_bytes) < pos + 2:
-                    raise ValueError("Insufficient data for account length")
-                name_len = struct.unpack("!H", data_bytes[pos:pos+2])[0]
-                pos += 2
-                if len(data_bytes) < pos + name_len:
-                    raise ValueError("Insufficient data for account name")
-                name = data_bytes[pos:pos+name_len].decode("utf-8")
-                pos += name_len
-                accounts.append(name)
-            if pos == len(data_bytes):
-                return {"total_accounts": total_accounts, "accounts": accounts}
-    except Exception:
-        pass
+    
+    if REVERSED_OP_CODES_SEND_RESPONSE_DICT["LIST_ACCOUNTS"] == opcode:
+        # Unpack total_accounts (I) and account_count (H)
+        total_accounts = struct.unpack("!I", data_bytes[:4])[0]
+        account_count = struct.unpack("!H", data_bytes[4:6])[0]
+        pos = 6
+        accounts = []
+        for i in range(account_count):
+            if len(data_bytes) < pos + 2:
+                raise ValueError("Insufficient data for account length")
+            name_len = struct.unpack("!H", data_bytes[pos:pos+2])[0]
+            pos += 2
+            if len(data_bytes) < pos + name_len:
+                raise ValueError("Insufficient data for account name")
+            name = data_bytes[pos:pos+name_len].decode("utf-8")
+            pos += name_len
+            accounts.append(name)
+        if pos == len(data_bytes):
+            return {"total_accounts": total_accounts, "accounts": accounts}
 
-    # Try to decode as conversation data:
-    try:
-        if len(data_bytes) >= 2:
-            # First, conversation_with length (H)
-            conv_len = struct.unpack("!H", data_bytes[:2])[0]
-            pos = 2
-            if len(data_bytes) < pos + conv_len:
-                raise ValueError("Not enough data for conversation_with")
-            conv_with = data_bytes[pos:pos+conv_len].decode("utf-8")
-            pos += conv_len
-            # Next: page_num (H), page_size (H)
+    elif REVERSED_OP_CODES_SEND_RESPONSE_DICT["READ_PARTNER"] == opcode:
+        # First, conversation_with length (H)
+        conv_len = struct.unpack("!H", data_bytes[:2])[0]
+        pos = 2
+        if len(data_bytes) < pos + conv_len:
+            raise ValueError("Not enough data for conversation_with")
+        conv_with = data_bytes[pos:pos+conv_len].decode("utf-8")
+        pos += conv_len
+        # Next: page_num (H), page_size (H)
+        if len(data_bytes) < pos + 4:
+            raise ValueError("Not enough data for paging")
+        page_num, page_size = struct.unpack("!HH", data_bytes[pos:pos+4])
+        pos += 4
+        # Next: total_msgs (I) and remaining (I)
+        if len(data_bytes) < pos + 8:
+            raise ValueError("Not enough data for totals")
+        total_msgs = struct.unpack("!I", data_bytes[pos:pos+4])[0]
+        pos += 4
+        remaining = struct.unpack("!I", data_bytes[pos:pos+4])[0]
+        pos += 4
+        # Next: message_count (H)
+        if len(data_bytes) < pos + 2:
+            raise ValueError("Not enough data for message count")
+        message_count = struct.unpack("!H", data_bytes[pos:pos+2])[0]
+        pos += 2
+        messages = []
+        for i in range(message_count):
+            if len(data_bytes) < pos + 6:
+                raise ValueError("Insufficient data for a message")
+            msg_id = struct.unpack("!I", data_bytes[pos:pos+4])[0]
+            pos += 4
+            content_len = struct.unpack("!H", data_bytes[pos:pos+2])[0]
+            pos += 2
+            if len(data_bytes) < pos + content_len + 1:
+                raise ValueError("Insufficient data for message content")
+            content = data_bytes[pos:pos+content_len].decode("utf-8")
+            pos += content_len
+            read_flag = struct.unpack("!B", data_bytes[pos:pos+1])[0]
+            pos += 1
+            messages.append({"id": msg_id, "content": content, "read": bool(read_flag)})
+        if pos == len(data_bytes):
+            return {"conversation_with": conv_with, "page_num": page_num, "page_size": page_size,
+                    "total_msgs": total_msgs, "remaining": remaining, "messages": messages}
+
+    elif REVERSED_OP_CODES_SEND_RESPONSE_DICT["READ_GENERAL"] == opcode:
+        total_unread, remaining_unread = struct.unpack("!II", data_bytes[:8])
+        pos = 8
+        if len(data_bytes) < pos + 2:
+            raise ValueError("Not enough data for message count")
+        message_count = struct.unpack("!H", data_bytes[pos:pos+2])[0]
+        pos += 2
+        messages = []
+        for i in range(message_count):
             if len(data_bytes) < pos + 4:
-                raise ValueError("Not enough data for paging")
-            page_num, page_size = struct.unpack("!HH", data_bytes[pos:pos+4])
+                raise ValueError("Insufficient data for message id")
+            msg_id = struct.unpack("!I", data_bytes[pos:pos+4])[0]
             pos += 4
-            # Next: total_msgs (I) and remaining (I)
-            if len(data_bytes) < pos + 8:
-                raise ValueError("Not enough data for totals")
-            total_msgs = struct.unpack("!I", data_bytes[pos:pos+4])[0]
-            pos += 4
-            remaining = struct.unpack("!I", data_bytes[pos:pos+4])[0]
-            pos += 4
-            # Next: message_count (H)
-            if len(data_bytes) < pos + 2:
-                raise ValueError("Not enough data for message count")
-            message_count = struct.unpack("!H", data_bytes[pos:pos+2])[0]
+            sender_len = struct.unpack("!H", data_bytes[pos:pos+2])[0]
             pos += 2
-            messages = []
-            for i in range(message_count):
-                if len(data_bytes) < pos + 6:
-                    raise ValueError("Insufficient data for a message")
-                msg_id = struct.unpack("!I", data_bytes[pos:pos+4])[0]
-                pos += 4
-                content_len = struct.unpack("!H", data_bytes[pos:pos+2])[0]
-                pos += 2
-                if len(data_bytes) < pos + content_len + 1:
-                    raise ValueError("Insufficient data for message content")
-                content = data_bytes[pos:pos+content_len].decode("utf-8")
-                pos += content_len
-                read_flag = struct.unpack("!B", data_bytes[pos:pos+1])[0]
-                pos += 1
-                messages.append({"id": msg_id, "content": content, "read": bool(read_flag)})
-            if pos == len(data_bytes):
-                return {"conversation_with": conv_with, "page_num": page_num, "page_size": page_size,
-                        "total_msgs": total_msgs, "remaining": remaining, "messages": messages}
-    except Exception:
-        pass
-
-    # Try to decode as unread messages data:
-    try:
-        if len(data_bytes) >= 8:
-            total_unread, remaining_unread = struct.unpack("!II", data_bytes[:8])
-            pos = 8
-            if len(data_bytes) < pos + 2:
-                raise ValueError("Not enough data for message count")
-            message_count = struct.unpack("!H", data_bytes[pos:pos+2])[0]
+            if len(data_bytes) < pos + sender_len:
+                raise ValueError("Not enough data for sender")
+            sender = data_bytes[pos:pos+sender_len].decode("utf-8")
+            pos += sender_len
+            content_len = struct.unpack("!H", data_bytes[pos:pos+2])[0]
             pos += 2
-            messages = []
-            for i in range(message_count):
-                if len(data_bytes) < pos + 4:
-                    raise ValueError("Insufficient data for message id")
-                msg_id = struct.unpack("!I", data_bytes[pos:pos+4])[0]
-                pos += 4
-                sender_len = struct.unpack("!H", data_bytes[pos:pos+2])[0]
-                pos += 2
-                if len(data_bytes) < pos + sender_len:
-                    raise ValueError("Not enough data for sender")
-                sender = data_bytes[pos:pos+sender_len].decode("utf-8")
-                pos += sender_len
-                content_len = struct.unpack("!H", data_bytes[pos:pos+2])[0]
-                pos += 2
-                if len(data_bytes) < pos + content_len + 1:
-                    raise ValueError("Not enough data for content")
-                content = data_bytes[pos:pos+content_len].decode("utf-8")
-                pos += content_len
-                read_flag = struct.unpack("!B", data_bytes[pos:pos+1])[0]
-                pos += 1
-                messages.append({"id": msg_id, "sender": sender, "content": content, "read": bool(read_flag)})
-            if pos == len(data_bytes):
-                return {"total_unread": total_unread, "remaining_unread": remaining_unread, "read_messages": messages}
-    except Exception:
-        pass
+            if len(data_bytes) < pos + content_len + 1:
+                raise ValueError("Not enough data for content")
+            content = data_bytes[pos:pos+content_len].decode("utf-8")
+            pos += content_len
+            read_flag = struct.unpack("!B", data_bytes[pos:pos+1])[0]
+            pos += 1
+            messages.append({"id": msg_id, "sender": sender, "content": content, "read": bool(read_flag)})
+        if pos == len(data_bytes):
+            return {"total_unread": total_unread, "remaining_unread": remaining_unread, "read_messages": messages}
+            
 
-    # Fallback: return the raw data as a hex string.
-    return {"raw_data": data_bytes.hex()}
-
-def _decode_response_payload(payload: bytes) -> Dict[str, Any]:
+def _decode_response_payload(payload: bytes, opcode=None) -> Dict[str, Any]:
     """
     Decode the binary response payload.
     
@@ -263,7 +259,7 @@ def _decode_response_payload(payload: bytes) -> Dict[str, Any]:
     data = None
     if data_len:
         data_bytes = payload[pos:pos+data_len]
-        data = decode_data_bytes(data_bytes)
+        data = decode_data_bytes(data_bytes, opcode)
     return {
         "success": bool(success_flag),
         "message": message,
@@ -310,7 +306,7 @@ class JSONClient:
                         break  # Wait until full payload is received.
                     payload = buffer[header_size:header_size+payload_len]
                     buffer = buffer[header_size+payload_len:]
-                    response = _decode_response_payload(payload)
+                    response = _decode_response_payload(payload, opcode)
                     # If the decoded response's data contains an "event" key, treat it as a push event.
                     if isinstance(response.get("data"), dict) and "event" in response["data"]:
                         self.handle_push_event(response["data"])
@@ -636,7 +632,7 @@ if __name__ == "__main__":
             raise Exception("incomplete header received")
         version, opcode, payload_len = struct.unpack("!BBH", header)
         payload = recvall(sock, payload_len)
-        return _decode_response_payload(payload)
+        return _decode_response_payload(payload, opcode)
 
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.connect(("localhost", 12345))
