@@ -749,7 +749,6 @@ class chatapp(tk.Tk):
             self.user_color_map[username] = USER_COLORS[idx]
         return self.user_color_map[username]
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="irc/gmail hybrid chat application"
@@ -760,6 +759,18 @@ if __name__ == "__main__":
         action="store_true",
         help="enable verbose logging (default shows errors only)",
     )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="localhost",
+        help="host address to connect to (default: localhost)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=12345,
+        help="port to connect to (default: 12345)",
+    )
     args = parser.parse_args()
 
     log_level = logging.DEBUG if args.verbose else logging.ERROR
@@ -769,7 +780,6 @@ if __name__ == "__main__":
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     logging.info("starting chat application")
-    app = chatapp(CustomProtocolClient, "localhost", 12345)
+    app = chatapp(CustomProtocolClient, args.host, args.port)
     app.mainloop()
     logging.info("chat application closed")
-

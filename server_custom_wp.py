@@ -12,6 +12,15 @@ from datetime import datetime
 logging.basicConfig(level=logging.DEBUG,
                     format='[%(asctime)s] [%(levelname)s] %(message)s')
 
+def get_local_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+    finally:
+        s.close()
+    return ip
+
 with open("config.json", "r") as file:
     try:
         config = json.load(file)
@@ -19,7 +28,7 @@ with open("config.json", "r") as file:
         logging.error(f"failed to load config: {e}")
         config = {}
 
-HOST = config.get("HOST", str(socket.gethostbyname(socket.gethostname())))
+HOST = config.get("HOST", get_local_ip())
 PORT = config.get("PORT", 12345)
 
 # --- Persistent storage using shelve ---
