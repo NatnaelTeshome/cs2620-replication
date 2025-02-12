@@ -439,14 +439,11 @@ class ChatServer:
         try:
             data = client_state.sock.recv(1024)
             logging.debug(f"received data from {client_state.addr}: {len(data)} bytes")
-            print(f"the data is {data}")
         except Exception as e:
             logging.error(f"error reading from {client_state.addr}: {e}")
             data = None
 
-        print(data)
         if data:
-            print("if works")
             client_state.in_buffer += data
             try:
                 while True:
@@ -928,6 +925,19 @@ class ChatServer:
                 req_opcode=req_opcode,
             )
             logging.info(f"user '{user}' logged out from {client_state.addr}")
+
+    def disconnect_client(self, client_state):
+        """
+        Unregister and close the client socket.
+        If the client was logged in, remove it from logged_in_users.
+        """
+        logging.info(f"disconnecting {client_state.addr}")
+        self.selector.unregister(client_state.sock)
+
+        if client_state.current_user in self.logged_in_users:
+            self.logged_in_users.pop(client_state.current_user, None)
+
+        client_state.close()
 
 
 if __name__ == "__main__":

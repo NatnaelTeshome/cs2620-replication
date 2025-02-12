@@ -810,7 +810,6 @@ class ChatServer:
         Unregister and close the client socket.
         If the client was logged in, remove it from logged_in_users.
         """
-        print(f"[SERVER] Disconnecting {client_state.addr}")
         logging.info(f"disconnecting {client_state.addr}")
         self.selector.unregister(client_state.sock)
 
