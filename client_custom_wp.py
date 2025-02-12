@@ -51,7 +51,7 @@ def encode_create_account(payload) -> bytes:
                        len(username_bytes), username_bytes,
                        len(password_bytes), password_bytes)
 
-def encode_delete_account() -> bytes:
+def encode_delete_account(_payload) -> bytes:
     op_code = OP_CODES_DICT["DELETE_ACCOUNT"]
     # No additional payload.
     return struct.pack("!BB", VERSION, op_code)
