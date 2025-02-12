@@ -370,39 +370,6 @@ class ChatServer:
         self.send_response(client_state, success=True, data=data)
         logging.debug(f"listed accounts for {client_state.addr}: page {page_num}")
 
-    def _legacy_handle_list_accounts(self, client_state, request):
-        # TODO: Remove this
-        if client_state.current_user is None:
-            self.send_response(client_state, success=False,
-                               message="Please log in first.")
-            logging.warning(f"handle_list_accounts failed: not logged in {client_state.addr}")
-            return
-
-        page_size = request.get("page_size", 10)
-        page_num = request.get("page_num", 1)
-        pattern = request.get("pattern", "*") # By default, show all accounts
-
-        # TODO: Implement wildcard matching of accounts using the user specified
-        # pattern, and just return those
-
-        all_accounts = sorted(accounts.keys())
-        total_accounts = len(all_accounts)
-
-        start_index = (page_num - 1) * page_size
-        end_index = start_index + page_size
-
-        if start_index >= total_accounts:
-            page_accounts = []
-        else:
-            page_accounts = all_accounts[start_index:end_index]
-
-        data = {
-            "total_accounts": total_accounts,
-            "accounts": page_accounts
-        }
-        self.send_response(client_state, success=True, data=data)
-        logging.debug(f"listed accounts for {client_state.addr}: page {page_num}")
-
     def handle_send(self, client_state, request):
         """
         Send message from current user to a recipient.
@@ -638,68 +605,6 @@ class ChatServer:
         msg = f"deleted {len(message_ids)} messages."
         self.send_response(client_state, success=True, message=msg)
         logging.info(f"user '{username}' deleted {len(message_ids)} messages")
-
-    def deprecated_handle_delete_message(self, client_state, request):
-        if client_state.current_user is None:
-            self.send_response(client_state, success=False,
-                               message="Please log in first.")
-            logging.warning(f"handle_delete_message failed: not logged in {client_state.addr}")
-            return
-
-        username = client_state.current_user
-        message_ids = request.get("message_ids", [])
-        if not isinstance(message_ids, list):
-            message_ids = [message_ids]
-
-        user_msgs = accounts[username]["messages"]
-        before_count = len(user_msgs)
-
-        # Before removing messages, find all affected users.
-        # This is needed to notify them of the deletion
-        affected_users = set()
-        for msg in user_msgs:
-            # TODO: We should instead have a table / hashmap
-            # that directly maps IDs to messages, instead of
-            # having to perform a linear scan
-            if msg["id"] in message_ids:
-                affected_users.add(msg["from"])
-                affected_users.add(msg["to"])
-        affected_users.discard(username)
-        logging.debug("Message ids %s deleted. Will notify users: %s", str(message_ids), str(affected_users))
-
-        # Remove from 'messages'
-        new_msgs = [m for m in user_msgs if m["id"] not in message_ids]
-        after_count = len(new_msgs)
-        accounts[username]["messages"] = new_msgs
-
-        # Also remove from 'conversations'
-        conversations = accounts[username]["conversations"]
-        for partner, msg_list in conversations.items():
-            new_list = [m for m in msg_list if m["id"] not in message_ids]
-            conversations[partner] = new_list
-
-        # Notify affected users
-        for user in affected_users:
-            if user in accounts:
-                recipient_state = self.logged_in_users.get(user, None)
-                if not recipient_state:
-                    # We don't notify users that are not currently logged in
-                    continue
-                self.push_event(
-                    recipient_state,
-                    "DELETE_MESSAGE",
-                    {
-                        "ids": message_ids,
-                    }
-                )
-                logging.info(f"pushed DELETE_MESSAGE event to '{user}'")
-            else:
-                logging.error("Cannot delete message for non-existent user %s", user)
-
-        deleted_count = before_count - after_count
-        msg = f"Deleted {deleted_count} messages."
-        self.send_response(client_state, success=True, message=msg)
-        logging.info(f"user '{username}' deleted {deleted_count} messages")
 
     def handle_delete_account(self, client_state):
         if client_state.current_user is None:
