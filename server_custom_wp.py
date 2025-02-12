@@ -601,9 +601,7 @@ class ChatServer:
         id_to_message[msg_id] = new_msg
 
         # Acknowledge to the sender
-        self.send_response(client_state, success=True,
-                           message=f"message sent to '{recipient}': {content}",
-                           req_opcode=req_opcode)
+        self.send_response(client_state, success=True, req_opcode=req_opcode)
         logging.info(f"user '{sender}' sent message id {msg_id} to '{recipient}'")
 
         # If recipient is logged in, push a notification to them

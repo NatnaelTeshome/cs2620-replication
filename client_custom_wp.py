@@ -314,13 +314,17 @@ def _decode_response_payload(payload: bytes, opcode=None) -> Dict[str, Any]:
     }
 
 class CustomProtocolClient:
-    def __init__(self, host: str, port: int) -> None:
+    def __init__(self, host: str, port: int,
+                 on_msg_callback = None,
+                 on_delete_callback = None) -> None:
         self.host = host
         self.port = port
         self.username: Optional[str] = None
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.connect((host, port))
         self.response_queue = queue.Queue()
+        self.on_msg_callback = on_msg_callback
+        self.on_delete_callback = on_delete_callback
         self.running = True
         self.listener_thread = threading.Thread(target=self._listen, daemon=True)
         self.listener_thread.start()
@@ -358,8 +362,12 @@ class CustomProtocolClient:
         data = message.get("data")
         if event == "NEW_MESSAGE":
             print(f"[PUSH] New message received: {data}")
+            if self.on_msg_callback:
+                self.on_msg_callback(data)
         elif event == "DELETE_MESSAGE":
             print(f"[PUSH] Delete message event: {data}")
+            if self.on_delete_callback:
+                self.on_delete_callback(data)
         else:
             print(f"[PUSH] Unknown push event: {message}")
 

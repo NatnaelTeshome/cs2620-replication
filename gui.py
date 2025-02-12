@@ -6,6 +6,7 @@ import logging
 import argparse
 
 from client import JSONClient, MockClient
+from client_custom_wp import CustomProtocolClient
 
 USER_COLORS = [
     "#1f77b4",  # a cool blue
@@ -768,7 +769,7 @@ if __name__ == "__main__":
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     logging.info("starting chat application")
-    app = chatapp(JSONClient, "localhost", 12345)
+    app = chatapp(CustomProtocolClient, "localhost", 12345)
     app.mainloop()
     logging.info("chat application closed")
 
