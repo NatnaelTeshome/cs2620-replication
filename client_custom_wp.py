@@ -67,7 +67,7 @@ def encode_list_accounts(payload) -> bytes:
 
 def encode_send_message(payload) -> bytes:
     op_code = OP_CODES_DICT["SEND_MESSAGE"]
-    recipient = payload.get("recipient")
+    recipient = payload.get("to")
     message = payload.get("message")
     recipient_bytes = recipient.encode("utf-8")
     message_bytes = message.encode("utf-8")
@@ -222,7 +222,7 @@ def decode_data_bytes(data_bytes: bytes, opcode=None) -> any:
                 pos += content_len
                 read_flag = struct.unpack("!B", payload[pos:pos+1])[0]
                 pos += 1
-                messages.append({"id": msg_id, "sender": sender, "content": content,
+                messages.append({"id": msg_id, "from": sender, "content": content,
                                  "read": bool(read_flag)})
             return {"total_unread": total_unread, "remaining_unread": remaining_unread,
                     "read_messages": messages}
@@ -260,7 +260,7 @@ def decode_push_event(payload: bytes) -> dict:
         if len(data_bytes) < pos + content_len:
             raise ValueError("insufficient data for content in new_message event")
         content = data_bytes[pos:pos+content_len].decode("utf-8")
-        return {"event": "NEW_MESSAGE", "data": {"id": msg_id, "sender": sender, "content": content}}
+        return {"event": "NEW_MESSAGE", "data": {"id": msg_id, "from": sender, "content": content}}
     elif event_type == EVENT_DELETE_MESSAGE:
         # delete_message: count (B) then count * message_id (I)
         if len(data_bytes) < 1:
@@ -408,7 +408,7 @@ class CustomProtocolClient:
     def send_message(self, recipient: str, message: str) -> None:
         if not self.username:
             raise Exception("not logged in")
-        payload = {"action": "SEND_MESSAGE", "recipient": recipient, "message": message}
+        payload = {"action": "SEND_MESSAGE", "to": recipient, "message": message}
         response = self._send_request(payload)
         if not response.get("success", False):
             raise Exception(response.get("message", "Failed to send message"))
@@ -452,6 +452,7 @@ class CustomProtocolClient:
 
 
 if __name__ == "__main__":
+    """For testing purposes only!"""
     client = CustomProtocolClient("localhost", 12345)
     try:
         while True:
@@ -485,7 +486,7 @@ if __name__ == "__main__":
                 msgs = client.read_messages(offset, count, partner if partner else None)
                 print("messages:", msgs)
             elif cmd == "delete_message":
-                msg_id = int(input("message id: ").strip())
+                msg_id = int(input("message id: ").strip() or "-1")
                 client.delete_message(msg_id)
             elif cmd == "check_username":
                 username = input("username: ").strip()

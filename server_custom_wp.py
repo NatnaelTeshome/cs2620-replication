@@ -110,7 +110,7 @@ def encode_unread_data(data: dict) -> bytes:
     for msg in messages:
         logging.debug(f"Encoding message: {msg}")
         msg_id = msg.get("id", 0)
-        sender = msg.get("sender", "")
+        sender = msg.get("from", "")
         sender_bytes = sender.encode("utf-8")
         content = msg.get("content", "")
         content_bytes = content.encode("utf-8")
@@ -141,7 +141,7 @@ def encode_event(event_type: int, data_bytes: bytes) -> bytes:
 
 def encode_new_message_event(data: dict) -> bytes:
     msg_id = data.get("id", 0)
-    sender = data.get("sender", "")
+    sender = data.get("from", "")
     content = data.get("content", "")
     sender_bytes = sender.encode("utf-8")
     content_bytes = content.encode("utf-8")
@@ -216,7 +216,7 @@ def decode_message_from_buffer(buffer: bytes):
         message_bytes = buffer[pos+2: pos+2+message_len]
         total_consumed = pos + 2 + message_len
         req["action"] = "SEND_MESSAGE"
-        req["recipient"] = recipient_bytes.decode("utf-8")
+        req["to"] = recipient_bytes.decode("utf-8")
         req["content"] = message_bytes.decode("utf-8")
         return req, total_consumed
 
@@ -574,7 +574,7 @@ class ChatServer:
             logging.warning(f"handle_send failed: not logged in {client_state.addr}")
             return
         sender = client_state.current_user
-        recipient = request.get("recipient", "")
+        recipient = request.get("to", "")
         content = request.get("content", "").strip()
         if not recipient or not content:
             self.send_response(client_state, success=False, message="recipient or content missing.",
@@ -589,21 +589,28 @@ class ChatServer:
         global global_message_id
         global_message_id += 1
         msg_id = global_message_id
-        new_msg = {"id": msg_id, "sender": sender, "content": content, "read": False}
+        new_msg = {"id": msg_id, "from": sender, "to": recipient, "content": content, "read": False}
         accounts[recipient]["messages"].append(new_msg)
         if sender not in accounts[recipient]["conversations"]:
             accounts[recipient]["conversations"][sender] = []
         accounts[recipient]["conversations"][sender].append(
             {"id": msg_id, "content": content, "read": False}
         )
+
+        # Store the message in our ID to msg mapping
+        id_to_message[msg_id] = new_msg
+
+        # Acknowledge to the sender
         self.send_response(client_state, success=True,
                            message=f"message sent to '{recipient}': {content}",
                            req_opcode=req_opcode)
         logging.info(f"user '{sender}' sent message id {msg_id} to '{recipient}'")
+
+        # If recipient is logged in, push a notification to them
         recipient_state = self.logged_in_users.get(recipient)
         if recipient_state:
             self.push_event(recipient_state, "NEW_MESSAGE",
-                            {"id": msg_id, "sender": sender, "content": content})
+                            {"id": msg_id, "from": sender, "content": content})
             logging.info(f"pushed new message event to '{recipient}'")
         persist_data()
 
@@ -651,7 +658,7 @@ class ChatServer:
                 m["read"] = True
             conversations = accounts[username].get("conversations", {})
             for msg in to_read:
-                snd = msg["sender"]
+                snd = msg["from"]
                 if snd in conversations:
                     for conv_msg in conversations[snd]:
                         if conv_msg["id"] == msg["id"]:
@@ -708,7 +715,7 @@ class ChatServer:
             if user in accounts:
                 recipient_state = self.logged_in_users.get(user)
                 if recipient_state:
-                    self.push_event(recipient_state, "DELETE_MESSAGE", {"ids": message_ids})
+                    self.push_event(recipient_state, "DELETE_MESSAGE", {"message_ids": message_ids})
                     logging.info(f"pushed DELETE_MESSAGE event to '{user}'")
             else:
                 logging.error("cannot delete message for non-existent user %s", user)
