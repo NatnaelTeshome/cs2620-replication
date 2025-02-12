@@ -20,19 +20,6 @@ OP_CODES_DICT = {
     "QUIT": 9
 }
 
-# Map actions to their encoder functions.
-encoder_map = {
-    "LOGIN": encode_login,
-    "CREATE_ACCOUNT": encode_create_account,
-    "DELETE_ACCOUNT": encode_delete_account,
-    "LIST_ACCOUNTS": encode_list_accounts,
-    "SEND_MESSAGE": encode_send_message,
-    "READ_MESSAGES": encode_read_messages,
-    "DELETE_MESSAGE": encode_delete_message,
-    "CHECK_USERNAME": encode_check_username,
-    "QUIT": encode_quit,
-}
-
 def encode_login(payload) -> bytes:
     op_code = OP_CODES_DICT["LOGIN"]
     username = payload.get("username")
@@ -71,7 +58,7 @@ def encode_list_accounts(payload) -> bytes:
     pattern = payload.get("pattern")
     pattern_bytes = pattern.encode("utf-8")
     # Format: Version (B), Opcode (B), page_size (H), page_num (H), pattern_len (H) pattern_bytes (H{len(pattern_bytes)}s)
-    return struct.pack("!BBHHH{len(pattern_bytes)}s", VERSION, op_code, page_size, page_num, len(pattern_bytes), pattern_bytes)
+    return struct.pack(f"!BBHHH{len(pattern_bytes)}s", VERSION, op_code, page_size, page_num, len(pattern_bytes), pattern_bytes)
 
 def encode_send_message(payload) -> bytes:
     op_code = OP_CODES_DICT["SEND_MESSAGE"]
@@ -120,6 +107,19 @@ def encode_check_username(payload) -> bytes:
 def encode_quit() -> bytes:
     op_code = OP_CODES_DICT["QUIT"]
     return struct.pack("!BB", VERSION, op_code)
+
+# Map actions to their encoder functions.
+encoder_map = {
+    "LOGIN": encode_login,
+    "CREATE_ACCOUNT": encode_create_account,
+    "DELETE_ACCOUNT": encode_delete_account,
+    "LIST_ACCOUNTS": encode_list_accounts,
+    "SEND_MESSAGE": encode_send_message,
+    "READ_MESSAGES": encode_read_messages,
+    "DELETE_MESSAGE": encode_delete_message,
+    "CHECK_USERNAME": encode_check_username,
+    "QUIT": encode_quit,
+}
 
 # ---------------------------------------------------------------------------
 # Helper to decode the binary-encoded data part of a response.
@@ -613,3 +613,104 @@ class MockClient:
         raise Exception("message not found")
 
 
+
+if __name__ == "__main__":
+    import socket
+    import struct
+    import sys
+
+    def recvall(sock, n):
+        data = b""
+        while len(data) < n:
+            packet = sock.recv(n - len(data))
+            if not packet:
+                break
+            data += packet
+        return data
+
+    def send_request(sock, data):
+        sock.sendall(data)
+        header_size = struct.calcsize("!BBH")
+        header = recvall(sock, header_size)
+        if len(header) < header_size:
+            raise Exception("incomplete header received")
+        version, opcode, payload_len = struct.unpack("!BBH", header)
+        payload = recvall(sock, payload_len)
+        return _decode_response_payload(payload)
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.connect(("localhost", 12345))
+    print("connected to server @ localhost:12345")
+    try:
+        while True:
+            cmd = input("cmd> ").strip().lower()
+            if cmd == "login":
+                username = input("username: ").strip()
+                password = input("password: ").strip()
+                data = encode_login({"username": username, "password": password})
+                resp = send_request(s, data)
+                print(resp)
+            elif cmd == "create_account":
+                username = input("username: ").strip()
+                password = input("password: ").strip()
+                data = encode_create_account({"username": username, "password": password})
+                resp = send_request(s, data)
+                print(resp)
+            elif cmd == "delete_account":
+                data = encode_delete_account()
+                resp = send_request(s, data)
+                print(resp)
+            elif cmd == "list_accounts":
+                pattern = input("pattern (default '*'): ").strip() or "*"
+                offset = int(input("offset (default 0): ").strip() or "0")
+                limit = int(input("limit (default 10): ").strip() or "10")
+                page_num = (offset // limit) + 1
+                data = encode_list_accounts({
+                    "page_size": limit,
+                    "page_num": page_num,
+                    "pattern": pattern,
+                })
+                resp = send_request(s, data)
+                print(resp)
+            elif cmd == "send_message":
+                recipient = input("recipient: ").strip()
+                message = input("message: ").strip()
+                data = encode_send_message({
+                    "recipient": recipient,
+                    "message": message,
+                })
+                resp = send_request(s, data)
+                print(resp)
+            elif cmd == "read_messages":
+                offset = int(input("offset (default 0): ").strip() or "0")
+                count = int(input("count (default 10): ").strip() or "10")
+                partner = input("chat partner (leave blank for all): ").strip()
+                payload = {"page_size": count, "page_num": (offset // count) + 1}
+                if partner:
+                    payload["chat_partner"] = partner
+                data = encode_read_messages(payload)
+                resp = send_request(s, data)
+                print(resp)
+            elif cmd == "delete_message":
+                msg_id = int(input("message id: ").strip())
+                data = encode_delete_message({"message_ids": [msg_id]})
+                resp = send_request(s, data)
+                print(resp)
+            elif cmd == "check_username":
+                username = input("username: ").strip()
+                data = encode_check_username({"username": username})
+                resp = send_request(s, data)
+                print(resp)
+            elif cmd == "quit":
+                data = encode_quit()
+                send_request(s, data)
+                print("bye")
+                break
+            else:
+                print("available cmds: login, create_account, delete_account, list_accounts,")
+                print("send_message, read_messages, delete_message, check_username, quit")
+    except Exception as e:
+        print("error:", e)
+    finally:
+        s.close()
+        sys.exit(0)
