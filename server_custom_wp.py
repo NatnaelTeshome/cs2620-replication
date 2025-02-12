@@ -216,7 +216,7 @@ def decode_message_from_buffer(buffer: bytes):
     Returns a tuple (request_dict, bytes_consumed) if a complete message is available,
     otherwise (None, 0).
     """
-    logging.debug(f"Raw buffer message: {bytes}")
+    logging.debug(f"Raw buffer message: {buffer}")
     if len(buffer) < 2:
         return None, 0
     version, op_code = struct.unpack("!BB", buffer[:2])
@@ -442,7 +442,7 @@ class ChatServer:
                     logging.debug(f"Decoded request from {client_state.addr}: {req}")
                     self.process_command(client_state, req)
             except Exception as e:
-                logging.error(f"error reading buffer: {e}")
+                logging.error(f"error processing buffer: {e}")
         else:
             self.disconnect_client(client_state)
 
