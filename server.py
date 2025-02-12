@@ -339,6 +339,10 @@ class ChatServer:
 
         page_size = request.get("page_size", 10)
         page_num = request.get("page_num", 1)
+        pattern = request.get("pattern", "*") # SELECT 'n*' FROM ACCOUNTS
+
+        # n*
+        # nalan, natnael, nathan, 
 
         all_accounts = sorted(accounts.keys())
         total_accounts = len(all_accounts)
