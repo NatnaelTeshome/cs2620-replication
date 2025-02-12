@@ -183,7 +183,7 @@ class client:
             "id": len(self.messages) + 1,
             "from": self.username if self.username else "unknown",
             "to": recipient,
-            "timestamp": int(datetime.now().strftime("%s")),
+            "timestamp": int(datetime.now().timestamp()),
             "content": message,
         }
         self.messages.append(new_msg)
@@ -669,18 +669,18 @@ class chatapp(tk.Tk):
             return
         try:
             new_id = self.client.send_message(self.selected_account, content)
-            logging.info("message sent to '%s'", self.selected_account)
+            logging.info(f"message sent to '{self.selected_account}'")
             new_msg = {
                 "id": new_id,
                 "from": self.current_user,
                 "to": self.selected_account,
-                "timestamp": int(datetime.now().strftime("%s")),
+                "timestamp": int(datetime.now().timestamp()),
                 "content": content,
             }
             if not any(m["id"] == new_msg["id"] for m in self.message_cache):
                 self.message_cache.append(new_msg)
         except Exception as e:
-            logging.error("failed to send message: %s", e)
+            logging.error(f"failed to send message: {e}")
             messagebox.showerror("error", f"failed to send message: {e}")
             return
         self.message_entry.delete(0, tk.END)
