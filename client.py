@@ -140,15 +140,14 @@ class JSONClient:
         payload = {
             "action": "LIST_ACCOUNTS",
             "page_size": limit,
-            "page_num": page_num
+            "page_num": page_num,
+            "pattern": pattern
         }
         response = self._send_request(payload)
         if not response.get("success", False):
             raise Exception(response.get("message", "Failed to list accounts"))
         accounts_data = response.get("data", {})
         accounts = accounts_data.get("accounts", [])
-        if pattern and pattern != "*":
-            accounts = [acct for acct in accounts if pattern in acct]
         return accounts
 
     def read_messages(self, offset: int = 0, count: int = 10,
