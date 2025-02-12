@@ -864,7 +864,6 @@ class ChatServer:
                 f"user '{username}' read {len(to_read)} unread messages"
             )
 
-
     def handle_delete_message(self, client_state, request):
         req_opcode = request.get("opcode")
         if client_state.current_user is None:
@@ -883,18 +882,80 @@ class ChatServer:
         message_ids = request.get("message_ids", [])
         if not isinstance(message_ids, list):
             message_ids = [message_ids]
-        user_msgs = accounts[username]["messages"]
-        before_count = len(user_msgs)
-        new_msgs = [m for m in user_msgs if m["id"] not in message_ids]
-        accounts[username]["messages"] = new_msgs
+
+        # determine affected users based on global id_to_message mapping
+        affected_users = set()
+        for msg_id in message_ids:
+            msg = id_to_message.get(msg_id)
+            if msg:
+                affected_users.add(msg["from"])
+                affected_users.add(msg["to"])
+        affected_users.discard(username)
+        logging.debug(
+            "message ids %s deleted. will notify users: %s",
+            str(message_ids),
+            str(affected_users)
+        )
+
+        # remove messages from the current user's message list
+        user_msgs = accounts.get(username, {}).get("messages", [])
+        if isinstance(user_msgs, list):
+            accounts[username]["messages"] = [m for m in user_msgs if m["id"] not in message_ids]
+
+        # for each msg id, remove the message from receiver's lists and global lookup
+        for msg_id in message_ids:
+            msg_obj = id_to_message.get(msg_id)
+            if not msg_obj:
+                logging.error("message with id %s doesn't exist?", str(msg_id))
+                continue
+
+            receiver = msg_obj["to"]
+
+            # remove from receiver's message list
+            receiver_msgs = accounts.get(receiver, {}).get("messages", [])
+            if isinstance(receiver_msgs, list):
+                accounts[receiver]["messages"] = [m for m in receiver_msgs if m["id"] not in message_ids]
+
+            # remove from receiver's conversations (using sender as key)
+            receiver_conversations = accounts.get(receiver, {}).get("conversations", {})
+            sender = msg_obj["from"]
+            if sender in receiver_conversations and isinstance(receiver_conversations[sender], list):
+                receiver_conversations[sender] = [
+                    m for m in receiver_conversations[sender] if m["id"] not in message_ids
+                ]
+
+            # remove from global mapping
+            id_to_message.pop(msg_id, None)
+
+        # also remove from the current user's own conversations
         conversations = accounts[username]["conversations"]
-        for partner, msg_list in conversations.items():
-            conversations[partner] = [m for m in msg_list if m["id"] not in message_ids]
-        deleted_count = before_count - len(new_msgs)
+        for partner in conversations:
+            conversations[partner] = [m for m in conversations[partner] if m["id"] not in message_ids]
+
+        # notify affected users via push event using DELETE_MESSAGE event type
+        for user in affected_users:
+            if user in accounts:
+                recipient_state = self.logged_in_users.get(user)
+                if recipient_state:
+                    self.push_event(
+                        recipient_state,
+                        "DELETE_MESSAGE",
+                        {"ids": message_ids}
+                    )
+                    logging.info(
+                        f"pushed DELETE_MESSAGE event to '{user}'"
+                    )
+            else:
+                logging.error("cannot delete message for non-existent user %s", user)
+
+        # calculate number of messages deleted from the current user's list
+        new_msgs = accounts[username]["messages"]
+        deleted_count = len(user_msgs) - len(new_msgs)
+        msg = f"deleted {deleted_count} messages."
         self.send_response(
             client_state,
             success=True,
-            message=f"deleted {deleted_count} messages.",
+            message=msg,
             req_opcode=req_opcode,
         )
         logging.info(
