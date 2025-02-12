@@ -96,6 +96,7 @@ def encode_conversation_data(data: dict) -> bytes:
         content = msg.get("content", "")
         content_bytes = content.encode("utf-8")
         read_flag = 1 if msg.get("read", False) else 0
+        timestamp = msg.get("timestamp", 0)
         result += struct.pack("!I", msg_id)
         result += struct.pack("!H", len(content_bytes)) + content_bytes
         result += struct.pack("!B", read_flag)
@@ -117,6 +118,7 @@ def encode_unread_data(data: dict) -> bytes:
         content = msg.get("content", "")
         content_bytes = content.encode("utf-8")
         read_flag = 1 if msg.get("read", False) else 0
+        timestamp = msg.get("timestamp", 0)
         result += struct.pack("!I", msg_id)
         result += struct.pack("!H", len(sender_bytes)) + sender_bytes
         result += struct.pack("!H", len(content_bytes)) + content_bytes
