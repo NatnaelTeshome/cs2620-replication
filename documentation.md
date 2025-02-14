@@ -20,7 +20,7 @@
 
 (Please refer to custom wire protocol pdf for wire protocol specific documentation)
 
-ChatSystem2620 is a simple client-server chat application that supports real-time text messaging between users. A centralized server (implemented by `server.py`) mediates interactions between multiple clients (implemtented by `client.py`). Core functionality includes:
+ChatSystem2620 is a simple client-server chat application that supports real-time text messaging between users. A centralized server (implemented by `server.py` and for custom wire protocol `server_custom_wp.py`) mediates interactions between multiple clients (implemtented by `client.py` and for custom wire protocol `client_custom_wp.py`). The GUI is implemented in `gui.py`. You can instantiate the server and run the gui in multiple machines with the correct port number to see full functionality. Core functionality includes:
 
 - **User Management:** Create accounts, log in, list users (with wildcard search), and account deletion.
 - **Messaging:** Send messages to other users, with immediate delivery for online recipients and stored delivery for offline users.
