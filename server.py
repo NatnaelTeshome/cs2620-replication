@@ -2,15 +2,14 @@ import selectors
 import socket
 import json
 import shelve
-import hashlib
 import logging
 import fnmatch
 from datetime import datetime
 
 logging.basicConfig(
-    level=logging.DEBUG,
-    format='[%(asctime)s] [%(levelname)s] %(message)s'
+    level=logging.DEBUG, format="[%(asctime)s] [%(levelname)s] %(message)s"
 )
+
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -20,6 +19,7 @@ def get_local_ip():
     finally:
         s.close()
     return ip
+
 
 with open("config.json", "r") as file:
     try:
@@ -54,6 +54,7 @@ else:
     global_message_id = 0
     db["global_message_id"] = global_message_id
 
+
 def persist_data():
     """
     Helper function to persist the in-memory data to disk.
@@ -62,6 +63,7 @@ def persist_data():
     db["id_to_message"] = id_to_message
     db["global_message_id"] = global_message_id
     db.sync()
+
 
 # ---------------------------
 # Account structure includes both 'messages' and 'conversations'
@@ -89,6 +91,7 @@ def persist_data():
 # Note: id_to_message maps message IDs to messages.
 # Global counter used for message ID generation is global_message_id.
 
+
 def get_unread_count(username):
     """
     Return number of unread messages for a user by scanning the 'messages' list.
@@ -98,11 +101,13 @@ def get_unread_count(username):
     msgs = user_info.get("messages", [])
     return sum(1 for m in msgs if not m["read"])
 
+
 class ClientState:
     """
     Holds per-client buffering, partial reads, etc.
     Also tracks which user is currently logged in (if any).
     """
+
     def __init__(self, sock):
         self.sock = sock
         self.addr = sock.getpeername()
@@ -116,9 +121,7 @@ class ClientState:
         Add a string (JSON-serialized response + newline) to the output buffer.
         """
         self.out_buffer.append(message_str)
-        logging.debug(
-            f"queued message for {self.addr}: {message_str.strip()}"
-        )
+        logging.debug(f"queued message for {self.addr}: {message_str.strip()}")
 
     def close(self):
         """
@@ -129,6 +132,7 @@ class ClientState:
             logging.debug(f"closed connection for {self.addr}")
         except OSError as e:
             logging.error(f"error closing connection for {self.addr}: {e}")
+
 
 class ChatServer:
     def __init__(self, host, port):
@@ -150,12 +154,8 @@ class ChatServer:
         listen_sock.setblocking(False)
 
         self.selector.register(listen_sock, selectors.EVENT_READ, data=None)
-        print(
-            f"[SERVER] Listening on {self.host}:{self.port} (selectors-based)"
-        )
-        logging.info(
-            f"listening on {self.host}:{self.port} (selectors-based)"
-        )
+        print(f"[SERVER] Listening on {self.host}:{self.port} (selectors-based)")
+        logging.info(f"listening on {self.host}:{self.port} (selectors-based)")
 
         try:
             while True:
@@ -184,7 +184,6 @@ class ChatServer:
         )
 
     def service_connection(self, key, mask):
-        sock = key.fileobj
         client_state = key.data
 
         if mask & selectors.EVENT_READ:
@@ -196,15 +195,13 @@ class ChatServer:
         """Read any incoming data, parse it by lines, handle JSON commands."""
         try:
             data = client_state.sock.recv(1024)
-            logging.debug(
-                f"received data from {client_state.addr}: {len(data)} bytes"
-            )
+            logging.debug(f"received data from {client_state.addr}: {len(data)} bytes")
         except Exception as e:
             logging.error(f"error reading from {client_state.addr}: {e}")
             data = None
 
         if data:
-            client_state.in_buffer += data.decode('utf-8')
+            client_state.in_buffer += data.decode("utf-8")
             # Process line by line
             while True:
                 if "\n" in client_state.in_buffer:
@@ -226,14 +223,10 @@ class ChatServer:
         while client_state.out_buffer:
             msg_str = client_state.out_buffer.pop(0)
             try:
-                client_state.sock.sendall(msg_str.encode('utf-8'))
-                logging.debug(
-                    f"sent message to {client_state.addr}: {msg_str.strip()}"
-                )
+                client_state.sock.sendall(msg_str.encode("utf-8"))
+                logging.debug(f"sent message to {client_state.addr}: {msg_str.strip()}")
             except Exception as e:
-                logging.error(
-                    f"error sending message to {client_state.addr}: {e}"
-                )
+                logging.error(f"error sending message to {client_state.addr}: {e}")
                 self.disconnect_client(client_state)
                 break
 
@@ -243,16 +236,10 @@ class ChatServer:
         """
         try:
             request = json.loads(line)
-            logging.debug(
-                f"decoded json from {client_state.addr}: {request}"
-            )
+            logging.debug(f"decoded json from {client_state.addr}: {request}")
         except json.JSONDecodeError:
-            logging.error(
-                f"json decode error from {client_state.addr}: {line}"
-            )
-            self.send_response(
-                client_state, success=False, message="Invalid JSON."
-            )
+            logging.error(f"json decode error from {client_state.addr}: {line}")
+            self.send_response(client_state, success=False, message="Invalid JSON.")
             return
 
         action = request.get("action", "").upper()
@@ -277,9 +264,7 @@ class ChatServer:
         elif action == "LOGOUT":
             self.handle_logout(client_state)
         elif action == "QUIT":
-            self.send_response(
-                client_state, success=True, message="Connection closed."
-            )
+            self.send_response(client_state, success=True, message="Connection closed.")
             self.disconnect_client(client_state)
         else:
             self.send_response(
@@ -288,9 +273,7 @@ class ChatServer:
                 message=f"Unknown action: {action}",
             )
 
-    def send_response(
-        self, client_state, success=True, message="", data=None
-    ):
+    def send_response(self, client_state, success=True, message="", data=None):
         """
         Enqueue a JSON response message for the client to read.
         """
@@ -329,9 +312,7 @@ class ChatServer:
 
         if username in accounts:
             logging.debug("Username %s already taken", username)
-            self.send_response(
-                client_state, success=True, message="Username exists."
-            )
+            self.send_response(client_state, success=True, message="Username exists.")
         else:
             logging.debug("Username %s does not exists", username)
             self.send_response(
@@ -401,9 +382,7 @@ class ChatServer:
             return
 
         if username not in accounts:
-            self.send_response(
-                client_state, success=False, message="No such user."
-            )
+            self.send_response(client_state, success=False, message="No such user.")
             logging.warning(
                 f"handle_login failed: no such user '{username}' from {client_state.addr}"
             )
@@ -463,13 +442,15 @@ class ChatServer:
         start_index = (page_num - 1) * page_size
         end_index = start_index + page_size
 
-        page_accounts = matching_accounts[start_index:end_index] if start_index < total_accounts else []
+        page_accounts = (
+            matching_accounts[start_index:end_index]
+            if start_index < total_accounts
+            else []
+        )
 
         data = {"total_accounts": total_accounts, "accounts": page_accounts}
         self.send_response(client_state, success=True, data=data)
-        logging.debug(
-            f"listed accounts for {client_state.addr}: page {page_num}"
-        )
+        logging.debug(f"listed accounts for {client_state.addr}: page {page_num}")
 
     def handle_send(self, client_state, request):
         """
@@ -480,9 +461,7 @@ class ChatServer:
             self.send_response(
                 client_state, success=False, message="Please log in first."
             )
-            logging.warning(
-                f"handle_send failed: not logged in {client_state.addr}"
-            )
+            logging.warning(f"handle_send failed: not logged in {client_state.addr}")
             return
 
         sender = client_state.current_user
@@ -528,11 +507,13 @@ class ChatServer:
         # 2) Also add to the 'conversations' dictionary
         if sender not in accounts[recipient]["conversations"]:
             accounts[recipient]["conversations"][sender] = []
-        accounts[recipient]["conversations"][sender].append({
-            "id": msg_id,
-            "content": content,
-            "read": False,
-        })
+        accounts[recipient]["conversations"][sender].append(
+            {
+                "id": msg_id,
+                "content": content,
+                "read": False,
+            }
+        )
 
         # 3) Finally, store in our ID to message mapping
         id_to_message[msg_id] = new_msg
@@ -542,11 +523,9 @@ class ChatServer:
             client_state,
             success=True,
             message=f"Message sent to '{recipient}': {content}",
-            data={'id': msg_id}
+            data={"id": msg_id},
         )
-        logging.info(
-            f"user '{sender}' sent message id {msg_id} to '{recipient}'"
-        )
+        logging.info(f"user '{sender}' sent message id {msg_id} to '{recipient}'")
 
         # If the recipient is logged in, push a notification
         recipient_state = self.logged_in_users.get(recipient)
@@ -559,8 +538,8 @@ class ChatServer:
                     "from": sender,
                     "to": recipient,
                     "timestamp": int(datetime.now().strftime("%s")),
-                    "content": content
-                }
+                    "content": content,
+                },
             )
             logging.info(f"pushed new message event to '{recipient}'")
 
@@ -571,9 +550,7 @@ class ChatServer:
             self.send_response(
                 client_state, success=False, message="Please log in first."
             )
-            logging.warning(
-                f"handle_read failed: not logged in {client_state.addr}"
-            )
+            logging.warning(f"handle_read failed: not logged in {client_state.addr}")
             return
 
         username = client_state.current_user
@@ -618,12 +595,10 @@ class ChatServer:
                     "page_num": page_num,
                     "page_size": page_size,
                     "total_msgs": total_msgs,
-                    "remaining": max(0, total_msgs - end_idx)
-                }
+                    "remaining": max(0, total_msgs - end_idx),
+                },
             )
-            logging.info(
-                f"user '{username}' read conversation with '{chat_partner}'"
-            )
+            logging.info(f"user '{username}' read conversation with '{chat_partner}'")
         else:
             # Read from the 'messages' list (unread only)
             user_msgs = accounts[username]["messages"]
@@ -659,12 +634,10 @@ class ChatServer:
                 data={
                     "read_messages": to_read,
                     "total_unread": total_unread,
-                    "remaining_unread": max(0, total_unread - end_index)
-                }
+                    "remaining_unread": max(0, total_unread - end_index),
+                },
             )
-            logging.info(
-                f"user '{username}' read {len(to_read)} messages (unread)"
-            )
+            logging.info(f"user '{username}' read {len(to_read)} messages (unread)")
 
     def handle_delete_message(self, client_state, request) -> None:
         """
@@ -697,7 +670,7 @@ class ChatServer:
         logging.debug(
             "message ids %s deleted. will notify users: %s",
             str(message_ids),
-            str(affected_users)
+            str(affected_users),
         )
 
         # remove messages from id_to_message and user's message list
@@ -729,7 +702,9 @@ class ChatServer:
                 receiver_conversations[sender], list
             ):
                 receiver_conversations[sender] = [
-                    m for m in receiver_conversations[sender] if m["id"] not in message_ids
+                    m
+                    for m in receiver_conversations[sender]
+                    if m["id"] not in message_ids
                 ]
 
             # finally, remove from global lookup
@@ -748,23 +723,15 @@ class ChatServer:
                 recipient_state = self.logged_in_users.get(user)
                 if recipient_state:
                     self.push_event(
-                        recipient_state,
-                        "DELETE_MESSAGE",
-                        {"ids": message_ids}
+                        recipient_state, "DELETE_MESSAGE", {"ids": message_ids}
                     )
-                    logging.info(
-                        f"pushed DELETE_MESSAGE event to '{user}'"
-                    )
+                    logging.info(f"pushed DELETE_MESSAGE event to '{user}'")
             else:
                 logging.error("cannot delete message for non-existent user %s", user)
 
         msg = f"deleted {len(message_ids)} messages."
-        self.send_response(
-            client_state, success=True, message=msg
-        )
-        logging.info(
-            f"user '{username}' deleted {len(message_ids)} messages"
-        )
+        self.send_response(client_state, success=True, message=msg)
+        logging.info(f"user '{username}' deleted {len(message_ids)} messages")
 
         persist_data()
 
@@ -785,9 +752,7 @@ class ChatServer:
 
         client_state.current_user = None
         self.send_response(
-            client_state,
-            success=True,
-            message=f"Account '{username}' deleted."
+            client_state, success=True, message=f"Account '{username}' deleted."
         )
         logging.info(f"account '{username}' deleted")
 
@@ -796,9 +761,7 @@ class ChatServer:
     def handle_logout(self, client_state):
         if client_state.current_user is None:
             self.send_response(
-                client_state,
-                success=False,
-                message="No user is currently logged in."
+                client_state, success=False, message="No user is currently logged in."
             )
             logging.warning(
                 f"handle_logout failed: no user logged in from {client_state.addr}"
@@ -808,9 +771,7 @@ class ChatServer:
             client_state.current_user = None
             self.logged_in_users.pop(user, None)
             self.send_response(
-                client_state,
-                success=True,
-                message=f"User '{user}' logged out."
+                client_state, success=True, message=f"User '{user}' logged out."
             )
             logging.info(f"user '{user}' logged out from {client_state.addr}")
 
@@ -826,6 +787,7 @@ class ChatServer:
             self.logged_in_users.pop(client_state.current_user, None)
 
         client_state.close()
+
 
 if __name__ == "__main__":
     server = ChatServer(HOST, PORT)

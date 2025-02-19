@@ -5,9 +5,9 @@ from server_no_persistence import (
     ClientState,
     accounts,
     id_to_message,
-    global_message_id,
     get_unread_count,
 )
+
 
 # A minimal fake socket for testing purposes.
 class FakeSocket:
@@ -26,7 +26,8 @@ class FakeSocket:
         self.closed = True
 
     def recv(self, bufsize):
-        return b''  # for tests that do not simulate input
+        return b""  # for tests that do not simulate input
+
 
 # Reset globals before each test.
 @pytest.fixture(autouse=True)
@@ -36,6 +37,7 @@ def reset_globals():
     global global_message_id
     global_message_id = 0
 
+
 # Create a ChatServer instance and override unregister to be a no‐op.
 @pytest.fixture
 def server():
@@ -43,15 +45,18 @@ def server():
     srv.selector.unregister = lambda sock: None
     return srv
 
+
 # Provide a ClientState with a FakeSocket.
 @pytest.fixture
 def client_state():
     return ClientState(FakeSocket())
 
+
 def test_get_unread_count():
     accounts["alice"] = {"messages": [{"read": False}, {"read": True}, {"read": False}]}
     assert get_unread_count("alice") == 2
     assert get_unread_count("bob") == 0
+
 
 def test_check_username(server, client_state):
     # When username is not in accounts.
@@ -68,6 +73,7 @@ def test_check_username(server, client_state):
     assert resp["success"]
     assert "exists" in resp["message"]
 
+
 def test_create_account(server, client_state):
     req = {"username": "alice", "password_hash": "hash"}
     server.create_account(client_state, req)
@@ -83,6 +89,7 @@ def test_create_account(server, client_state):
     resp = json.loads(client_state.out_buffer.pop(0))
     assert not resp["success"]
     assert "already exists" in resp["message"]
+
 
 def test_handle_login(server, client_state):
     accounts["alice"] = {"password_hash": "hash", "messages": [], "conversations": {}}
@@ -106,6 +113,7 @@ def test_handle_login(server, client_state):
     assert "Logged in as" in resp["message"]
     assert client_state.current_user == "alice"
 
+
 def test_list_accounts(server, client_state):
     # Not logged in → error.
     req = {"page_size": 2, "page_num": 1, "pattern": "*"}
@@ -126,6 +134,7 @@ def test_list_accounts(server, client_state):
     assert data.get("total_accounts") == 1
     assert data.get("accounts") == ["bob"]
 
+
 def test_handle_send(server, client_state):
     # Set up sender and recipient accounts.
     accounts["alice"] = {"password_hash": "hash", "messages": [], "conversations": {}}
@@ -135,12 +144,19 @@ def test_handle_send(server, client_state):
     bob_state = ClientState(FakeSocket(("127.0.0.1", 10001)))
     server.logged_in_users["bob"] = bob_state
 
+
 def test_handle_read_without_chat_partner(server, client_state):
     accounts["alice"] = {"messages": [], "conversations": {}}
     client_state.current_user = "alice"
     # Insert two unread messages.
     msg1 = {"id": 1, "from": "bob", "to": "alice", "content": "Hi", "read": False}
-    msg2 = {"id": 2, "from": "charlie", "to": "alice", "content": "Hello", "read": False}
+    msg2 = {
+        "id": 2,
+        "from": "charlie",
+        "to": "alice",
+        "content": "Hello",
+        "read": False,
+    }
     accounts["alice"]["messages"].extend([msg1, msg2])
     accounts["alice"]["conversations"] = {
         "bob": [{"id": 1, "content": "Hi", "read": False}],
@@ -155,12 +171,15 @@ def test_handle_read_without_chat_partner(server, client_state):
     assert len(read_msgs) == 1
     assert read_msgs[0]["read"] is True
 
+
 def test_handle_read_with_chat_partner(server, client_state):
     accounts["alice"] = {"messages": [], "conversations": {"bob": []}}
     client_state.current_user = "alice"
     msg = {"id": 1, "content": "Hi", "read": False}
     accounts["alice"]["conversations"]["bob"].append(msg)
-    accounts["alice"]["messages"].append({"id": 1, "from": "bob", "to": "alice", "content": "Hi", "read": False})
+    accounts["alice"]["messages"].append(
+        {"id": 1, "from": "bob", "to": "alice", "content": "Hi", "read": False}
+    )
     req = {"chat_partner": "bob", "page_size": 1, "page_num": 1}
     server.handle_read(client_state, req)
     resp = json.loads(client_state.out_buffer.pop(0))
@@ -171,6 +190,7 @@ def test_handle_read_with_chat_partner(server, client_state):
     assert len(messages) == 1
     assert messages[0]["read"] is True
 
+
 def test_handle_delete_message(server, client_state):
     # Set up a message from alice to bob.
     accounts["alice"] = {
@@ -178,10 +198,18 @@ def test_handle_delete_message(server, client_state):
         "conversations": {"bob": [{"id": 1, "content": "Hi", "read": False}]},
     }
     accounts["bob"] = {
-        "messages": [{"id": 1, "from": "alice", "to": "bob", "content": "Hi", "read": False}],
+        "messages": [
+            {"id": 1, "from": "alice", "to": "bob", "content": "Hi", "read": False}
+        ],
         "conversations": {"alice": [{"id": 1, "content": "Hi", "read": False}]},
     }
-    id_to_message[1] = {"id": 1, "from": "alice", "to": "bob", "content": "Hi", "read": False}
+    id_to_message[1] = {
+        "id": 1,
+        "from": "alice",
+        "to": "bob",
+        "content": "Hi",
+        "read": False,
+    }
     client_state.current_user = "alice"
     bob_state = ClientState(FakeSocket(("127.0.0.1", 10001)))
     server.logged_in_users["bob"] = bob_state
@@ -199,6 +227,7 @@ def test_handle_delete_message(server, client_state):
     assert evt.get("event") == "DELETE_MESSAGE"
     assert 1 in evt["data"]["ids"]
 
+
 def test_handle_delete_account(server, client_state):
     accounts["alice"] = {"password_hash": "hash", "messages": [], "conversations": {}}
     client_state.current_user = "alice"
@@ -211,6 +240,7 @@ def test_handle_delete_account(server, client_state):
     assert client_state.current_user is None
     assert "alice" not in server.logged_in_users
 
+
 def test_handle_logout(server, client_state):
     client_state.current_user = "alice"
     server.logged_in_users["alice"] = client_state
@@ -221,12 +251,14 @@ def test_handle_logout(server, client_state):
     assert client_state.current_user is None
     assert "alice" not in server.logged_in_users
 
+
 def test_process_invalid_json(server, client_state):
     bad_line = "not a json"
     server.process_command(client_state, bad_line)
     resp = json.loads(client_state.out_buffer.pop(0))
     assert not resp["success"]
     assert "Invalid JSON" in resp["message"]
+
 
 def test_process_unknown_action(server, client_state):
     req = {"action": "FOO"}
@@ -235,11 +267,14 @@ def test_process_unknown_action(server, client_state):
     assert not resp["success"]
     assert "Unknown action" in resp["message"]
 
+
 def test_quit_command(server, client_state):
     disconnected = False
+
     def fake_disconnect(cs):
         nonlocal disconnected
         disconnected = True
+
     server.disconnect_client = fake_disconnect
     req = {"action": "QUIT"}
     server.process_command(client_state, json.dumps(req))
