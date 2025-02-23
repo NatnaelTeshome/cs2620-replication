@@ -40,7 +40,7 @@ class message_line(tk.Frame):
         timestamp: str = datetime.fromtimestamp(msg_data.get("timestamp", 0)).strftime(
             "%Y-%m-%d %H:%M:%S"
         )
-        sender: str = msg_data.get("from", "unknown")
+        sender: str = msg_data.get("from_", "unknown")
         content: str = msg_data.get("content", "[ERROR] No message content")
         message_text: str = f"[{timestamp}] {sender}: {content}"
 
@@ -496,7 +496,7 @@ class chatapp(tk.Tk):
             filtered: List[Dict[str, Any]] = [
                 msg
                 for msg in self.message_cache
-                if msg.get("from", "") == self.selected_account
+                if msg.get("from_", "") == self.selected_account
                 or msg.get("to", "") == self.selected_account
             ]
             messages: List[Dict[str, Any]] = filtered[
@@ -507,7 +507,7 @@ class chatapp(tk.Tk):
                 self.message_offset : self.message_offset + self.message_page_size
             ]
         for msg in messages:
-            color: str = self.get_user_color(msg.get("from", "unknown"))
+            color: str = self.get_user_color(msg.get("from_", "unknown"))
             ml: message_line = message_line(
                 self.messages_container, msg, self.delete_message, user_color=color
             )
@@ -565,7 +565,7 @@ class chatapp(tk.Tk):
             logging.info(f"message sent to '{self.selected_account}'")
             new_msg: Dict[str, Any] = {
                 "id": new_id,
-                "from": self.current_user,
+                "from_": self.current_user,
                 "to": self.selected_account,
                 "timestamp": int(datetime.now().timestamp()),
                 "content": content,

@@ -10,4 +10,5 @@ dependencies = [
     "mypy>=1.15.0",
     "pre-commit>=4.1.0",
     "ruff>=0.9.6",
+    "types-protobuf>=5.29.1.20250208",
 ]
