@@ -5,7 +5,7 @@ from datetime import datetime
 import logging
 import argparse
 
-from client_custom_wp import CustomProtocolClient
+from client_grpc import CustomProtocolClient
 
 USER_COLORS: List[str] = [
     "#1f77b4",  # a cool blue

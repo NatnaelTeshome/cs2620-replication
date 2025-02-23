@@ -1,0 +1,156 @@
+syntax = "proto3";
+
+package chat;
+
+service ChatService {
+  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc CreateAccount(CreateAccountRequest) returns (CreateAccountResponse);
+  rpc CheckUsername(CheckUsernameRequest) returns (CheckUsernameResponse);
+  rpc ListAccounts(ListAccountsRequest) returns (ListAccountsResponse);
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+  rpc ReadMessages(ReadMessagesRequest) returns (ReadMessagesResponse);
+  rpc DeleteMessage(DeleteMessageRequest) returns (DeleteMessageResponse);
+  rpc DeleteAccount(DeleteAccountRequest) returns (DeleteAccountResponse);
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
+  rpc Subscribe(SubscribeRequest) returns (stream PushEvent);
+}
+
+message LoginRequest {
+  string username = 1;
+  string password_hash = 2;
+}
+
+message LoginResponse {
+  bool success = 1;
+  string message = 2;
+  int32 unread_count = 3;
+}
+
+message CreateAccountRequest {
+  string username = 1;
+  string password_hash = 2;
+}
+
+message CreateAccountResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message CheckUsernameRequest {
+  string username = 1;
+}
+
+message CheckUsernameResponse {
+  bool exists = 1;
+  string message = 2;
+}
+
+message ListAccountsRequest {
+  string username = 1;
+  string pattern = 2;
+  int32 page_size = 3;
+  int32 page_num = 4;
+}
+
+message ListAccountsResponse {
+  bool success = 1;
+  string message = 2;
+  repeated string accounts = 3;
+  int32 total_accounts = 4;
+}
+
+message SendMessageRequest {
+  string username = 1; // sender
+  string to = 2;
+  string content = 3;
+}
+
+message SendMessageResponse {
+  bool success = 1;
+  string message = 2;
+  int32 id = 3;
+}
+
+message ReadMessagesRequest {
+  string username = 1;
+  int32 page_size = 2;
+  int32 page_num = 3;
+  string chat_partner = 4; // if empty, read unread messages
+}
+
+message ChatMessage {
+  int32 id = 1;
+  string from_ = 2;
+  string to = 3;
+  string content = 4;
+  bool read = 5;
+  int64 timestamp = 6;
+}
+
+message ReadMessagesResponse {
+  bool success = 1;
+  string message = 2;
+  repeated ChatMessage messages = 3;
+  int32 total_msgs = 4;
+  int32 remaining = 5;
+  int32 total_unread = 6;
+  int32 remaining_unread = 7;
+}
+
+message DeleteMessageRequest {
+  string username = 1;
+  repeated int32 message_ids = 2;
+}
+
+message DeleteMessageResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message DeleteAccountRequest {
+  string username = 1;
+}
+
+message DeleteAccountResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message LogoutRequest {
+  string username = 1;
+}
+
+message LogoutResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message SubscribeRequest {
+  string username = 1;
+}
+
+enum EventType {
+  UNKNOWN = 0;
+  NEW_MESSAGE = 1;
+  DELETE_MESSAGE = 2;
+}
+
+message NewMessageEvent {
+  int32 id = 1;
+  string from_ = 2;
+  string to = 3;
+  int64 timestamp = 4;
+  string content = 5;
+}
+
+message DeleteMessageEvent {
+  repeated int32 ids = 1;
+}
+
+message PushEvent {
+  EventType event_type = 1;
+  oneof event_data {
+    NewMessageEvent new_message = 2;
+    DeleteMessageEvent delete_message = 3;
+  }
+}
