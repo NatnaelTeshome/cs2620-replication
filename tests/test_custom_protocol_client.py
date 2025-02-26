@@ -2,7 +2,10 @@ import struct
 import socket
 import pytest
 import time
-
+import os
+import sys
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.append(parent_dir)
 from client_custom_wp import (
     VERSION,
     OP_CODES_DICT,
@@ -22,10 +25,6 @@ from client_custom_wp import (
     _decode_response_payload,
     CustomProtocolClient,
 )
-
-##############################################
-# Fake Socket classes to avoid real networking
-##############################################
 
 
 class FakeSocket:

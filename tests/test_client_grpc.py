@@ -5,17 +5,13 @@ import threading
 import grpc
 import os
 import sys
-
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-
 sys.path.append(parent_dir)
-
-
 import chat_pb2
 import chat_pb2_grpc
-
 import chat_pb2
 from client_grpc import CustomProtocolClient
+
 
 class TestCustomProtocolClient(unittest.TestCase):
     def setUp(self):
