@@ -1,11 +1,10 @@
 import unittest
 import struct
+import json
 import os
 import sys
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(parent_dir)
-import json
-
 
 from server_custom_wp_no_persistence import (
     encode_list_accounts_data,

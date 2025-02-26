@@ -1,5 +1,9 @@
 import json
 import pytest
+import os
+import sys
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.append(parent_dir)
 from server_no_persistence import (
     ChatServer,
     ClientState,
@@ -8,6 +12,7 @@ from server_no_persistence import (
     global_message_id,
     get_unread_count,
 )
+
 
 # A minimal fake socket for testing purposes.
 class FakeSocket:
