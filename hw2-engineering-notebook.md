@@ -1,7 +1,7 @@
 # HW2 
 
 ### Link to the Code
-Our codebase can be found in the following [public GitHub repository](https://github.com/MKJM2/cs2620-wire-protocols):
+Our codebase can be found in the following [public GitHub repository](https://github.com/MKJM2/cs2620-wire-protocols), on the *main* branch:
 ```
 https://github.com/MKJM2/cs2620-wire-protocols
 ```
@@ -35,7 +35,7 @@ After some deliberation, we decided on the following approach:
 - For variable-length messages, we test across a range of realistic scenarios and edge cases to account for variability.
 
 ### Assumptions and Limitations
-- **Insecure gRPC Channels**: For this analysis, we use insecure gRPC channels, so we do not account for overhead from TLS encryption or HTTP/2 headers. We only measure the size of the actual payload.
+- **Insecure gRPC Channels**: For this analysis, we use insecure gRPC channels, so we do not account for overhead from TLS encryption or HTTP/2 headers. We only measure the size of the actual serialized Protobuf payload.
 - **Layer Differences**: This analysis isn't fully fair because:
   - Operating on raw sockets (our custom protocol) works directly on **Layer 4** (Transport Layer) of the OSI model (e.g., TCP or UDP).
   - gRPC is an **application-layer protocol** (Layer 7), built on top of HTTP/2.
@@ -44,7 +44,7 @@ After some deliberation, we decided on the following approach:
 Because the protocols operate at different levels of abstraction, we decided to focus on **raw serialization efficiency**. Specifically, we compare:
 - The size of the JSON dump.
 - The size of our custom binary payload.
-- The size of the protobuf payload sent over the network.
+- The size of the Protobuf payload sent over the network.
 
 ---
 
@@ -77,35 +77,35 @@ Because the protocols operate at different levels of abstraction, we decided to 
 
 #### Size Comparison Table for serialized messages
 
-| Message Type     | Case     | JSON (bytes) | Custom (bytes) | Protobuf (bytes) | Custom/JSON | Protobuf/JSON |
-|------------------|----------|--------------|----------------|------------------|-------------|----------------|
-| LOGIN            | empty    | 116          | 70             | 66               | 0.6         | 0.57           |
-|                  | small    | 118          | 72             | 70               | 0.61        | 0.59           |
-|                  | medium   | 127          | 81             | 79               | 0.64        | 0.62           |
-|                  | large    | 166          | 120            | 118              | 0.72        | 0.71           |
-| CREATE_ACCOUNT   | empty    | 125          | 70             | 66               | 0.56        | 0.53           |
-|                  | small    | 127          | 72             | 70               | 0.57        | 0.55           |
-|                  | medium   | 137          | 82             | 80               | 0.6         | 0.58           |
-|                  | large    | 225          | 170            | 168              | 0.76        | 0.75           |
-| SEND_MESSAGE     | empty    | 47           | 6              | 8                | 0.13        | 0.17           |
-|                  | small    | 50           | 9              | 15               | 0.18        | 0.3            |
-|                  | medium   | 71           | 30             | 36               | 0.42        | 0.51           |
-|                  | large    | 1267         | 1226           | 1233             | 0.97        | 0.97           |
-| DELETE_ACCOUNT   | empty    | 44           | 2              | 6                | 0.05        | 0.14           |
-|                  | typical  | 50           | 2              | 6                | 0.04        | 0.12           |
-| LIST_ACCOUNTS    | empty    | 69           | 8              | 6                | 0.12        | 0.09           |
-|                  | small    | 72           | 10             | 14               | 0.14        | 0.19           |
-|                  | large    | 77           | 14             | 18               | 0.18        | 0.23           |
-| READ_MESSAGES    | empty    | 74           | 7              | 6                | 0.09        | 0.08           |
-|                  | small    | 80           | 14             | 17               | 0.17        | 0.21           |
-|                  | large    | 116          | 49             | 52               | 0.42        | 0.45           |
-| DELETE_MESSAGE   | empty    | 43           | 3              | 6                | 0.07        | 0.14           |
-|                  | small    | 44           | 7              | 9                | 0.16        | 0.2            |
-|                  | large    | 433          | 403            | 108              | 0.93        | 0.25           |
-| CHECK_USERNAME   | empty    | 40           | 4              | 0                | 0.1         | 0.0            |
-|                  | small    | 42           | 6              | 4                | 0.14        | 0.1            |
-|                  | large    | 220          | 184            | 183              | 0.84        | 0.83           |
-| QUIT             | empty    | 14           | 2              | 6                | 0.14        | 0.43           |
+| Message Type     | Case     | JSON (bytes) | Custom (bytes) | Protobuf (bytes) |
+|------------------|----------|--------------|----------------|------------------|
+| LOGIN            | empty    | 116          | 70             | 66               |
+|                  | small    | 118          | 72             | 70               |
+|                  | medium   | 127          | 81             | 79               |
+|                  | large    | 166          | 120            | 118              |
+| CREATE_ACCOUNT   | empty    | 125          | 70             | 66               |
+|                  | small    | 127          | 72             | 70               |
+|                  | medium   | 137          | 82             | 80               |
+|                  | large    | 225          | 170            | 168              |
+| SEND_MESSAGE     | empty    | 47           | 6              | 8                |
+|                  | small    | 50           | 9              | 15               |
+|                  | medium   | 71           | 30             | 36               |
+|                  | large    | 1267         | 1226           | 1233             |
+| DELETE_ACCOUNT   | empty    | 44           | 2              | 6                |
+|                  | typical  | 50           | 2              | 6                |
+| LIST_ACCOUNTS    | empty    | 69           | 8              | 6                |
+|                  | small    | 72           | 10             | 14               |
+|                  | large    | 77           | 14             | 18               |
+| READ_MESSAGES    | empty    | 74           | 7              | 6                |
+|                  | small    | 80           | 14             | 17               |
+|                  | large    | 116          | 49             | 52               |
+| DELETE_MESSAGE   | empty    | 43           | 3              | 6                |
+|                  | small    | 44           | 7              | 9                |
+|                  | large    | 433          | 403            | 108              |
+| CHECK_USERNAME   | empty    | 40           | 4              | 0                |
+|                  | small    | 42           | 6              | 4                |
+|                  | large    | 220          | 184            | 183              |
+| QUIT             | empty    | 14           | 2              | 6                |
 
 For discussion of this table consider the following: 1) JSONs overhead (in bytes) is high, due to being text-based
 and human readable (need to store braces, colons, field names in plaintext), 2) Our custom protocol, while performing
