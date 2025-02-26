@@ -9,9 +9,18 @@ import shelve
 
 from datetime import datetime
 
+logging.basicConfig(level=logging.DEBUG,
+                    format='[%(asctime)s] [%(levelname)s] %(message)s')
 
-HOST = str(socket.gethostbyname(socket.gethostname()))
-PORT = 12345
+with open("config.json", "r") as file:
+    try:
+        config = json.load(file)
+    except Exception as e:
+        logging.error(f"failed to load config: {e}")
+        config = {}
+
+HOST = config.get("HOST", str(socket.gethostbyname(socket.gethostname())))
+PORT = config.get("PORT", 12345)
 
 # --- Protocol and encoding functions ---
 

@@ -88,8 +88,9 @@ Because the protocols operate at different levels of abstraction, we decided to 
 
 ## How Does It Change the Structure of the Client? The Server?
 
-(TODO)
+Switching to gRPC fundamentally alters the client by abstracting away the complexities of raw socket management and custom JSON handling. Instead of dealing with manual connection setups, message buffering, and decoding, the client now interacts with a generated stub that provides a set of clearly defined RPC methods. This means that the client can simply call functions like Login(), SendMessage(), or SubscribeEvents() without having to worry about the underlying network protocols. Also, push notifications or asynchronous events are managed through gRPC’s built-in streaming mechanism. This allows the client to receive updates in a dedicated background thread without manually parsing an incoming data stream.
 
+On the server side, gRPC transforms the architecture from a low-level, event-driven model into a structured, service-oriented framework. The server no longer has to manually read from sockets, split messages by newlines, or dispatch actions based on a JSON “ACTION” field. We instead implement each functionality as an individual RPC method defined in a Protocol Buffers file. This results in a cleaner separation of concerns where the business logic is decoupled from the network handling. The server also benefits from gRPC’s concurrency model, which manages multiple client requests efficiently using a thread pool, and from the streaming API that simplifies the process of sending asynchronous notifications to connected clients.
 ---
 
 ## How Does This Change the Testing of the Application?
