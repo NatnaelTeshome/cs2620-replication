@@ -242,12 +242,10 @@ def run_benchmarks() -> Dict[str, Dict[str, Dict[str, Any]]]:
 
 
 # --- Results Table Printer ---
-
-
 def print_results_table(results: Dict[str, Dict[str, Dict[str, Any]]]) -> None:
     header = (
-        "| Message Type     | Case     | JSON (bytes) | Custom (bytes) | "
-        "Custom/JSON | Protobuf (bytes) | Protobuf/JSON |"
+        "| Message Type     | Case     | JSON (bytes) | Custom (bytes) | Protobuf (bytes) | "
+        "Custom/JSON | Protobuf/JSON |"
     )
     separator = (
         "|"
@@ -259,9 +257,9 @@ def print_results_table(results: Dict[str, Dict[str, Dict[str, Any]]]) -> None:
         + "|"
         + "-" * 16
         + "|"
-        + "-" * 13
-        + "|"
         + "-" * 18
+        + "|"
+        + "-" * 13
         + "|"
         + "-" * 16
         + "|"
@@ -274,8 +272,8 @@ def print_results_table(results: Dict[str, Dict[str, Dict[str, Any]]]) -> None:
             type_cell = msg_type if first_row else ""
             line = (
                 f"| {type_cell:<16} | {case_name:<8} | {sizes['JSON']:<12} | "
-                f"{sizes['Custom']:<14} | {sizes['Custom/JSON']:<11} | "
-                f"{sizes['Protobuf']:<16} | {sizes['Protobuf/JSON']:<14} |"
+                f"{sizes['Custom']:<14} | {sizes['Protobuf']:<16} | "
+                f"{sizes['Custom/JSON']:<11} | {sizes['Protobuf/JSON']:<14} |"
             )
             print(line)
             first_row = False
