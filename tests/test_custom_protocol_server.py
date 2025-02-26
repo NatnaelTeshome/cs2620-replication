@@ -1,8 +1,6 @@
 import unittest
 import struct
 
-# For our tests we assume the following names are imported from your chat server module.
-# (If they are in the same file, you may remove the import statement and run the tests.)
 from server_custom_wp_no_persistence import (
     encode_list_accounts_data,
     encode_conversation_data,
