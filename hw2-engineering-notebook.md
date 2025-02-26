@@ -94,4 +94,9 @@ Because the protocols operate at different levels of abstraction, we decided to 
 
 ## How Does This Change the Testing of the Application?
 
-(TODO)
+The JSON wire protocol tests and the gRPC tests we implemented differ significantly in both approach and structure.
+The JSON tests focus on raw transport layer simulation, using FakeSocket classes to intercept network communication and verify serialized JSON payloads. They rely on pytest fixtures for dependency injection and global state management, with explicit reset mechanisms between tests.
+But, our gRPC tests focus on the service interface rather than the transport details. Instead of mocking sockets, they mock the gRPC service stubs and interceptors, working with strongly-typed protocol buffer messages instead of raw JSON strings. The tests use unittest's setUp/tearDown pattern with patchers to isolate components.
+The JSON tests handle serialization/deserialization explicitly, asserting against parsed JSON content. Our gRPC tests work with structured message objects. It on the values and fields rather than the serialization format.
+For asynchronous operations, the JSON tests verify callback execution for events, while our gRPC tests directly examine the streaming RPC generators and subscription mechanisms.
+We can say that the JSON tests operate closer to the wire protocol level, while our gRPC tests operate at a higher abstraction level.
