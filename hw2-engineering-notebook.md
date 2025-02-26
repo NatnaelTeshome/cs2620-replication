@@ -48,16 +48,6 @@ Because the protocols operate at different levels of abstraction, we decided to 
 
 ---
 
-### Size Comparison Table (TODO: Fill in the table with actual data)
-
-| **Message Type**       | **JSON Size (bytes)** | **Custom Protocol Size (bytes)** | **Protobuf Size (bytes)** |
-|-------------------------|-----------------------|-----------------------------------|---------------------------|
-| LOGIN                  | TODO                 | TODO                             | TODO                     |
-| CREATE_ACCOUNT         | TODO                 | TODO                             | TODO                     |
-| LIST_ACCOUNTS (1 page) | TODO                 | TODO                             | TODO                     |
-| SEND_MESSAGE           | TODO                 | TODO                             | TODO                     |
-| READ_MESSAGES (1 page) | TODO                 | TODO                             | TODO                     |
-
 ---
 
 ### Testing Across Realistic Scenarios and Edge Cases
@@ -82,7 +72,51 @@ Because the protocols operate at different levels of abstraction, we decided to 
 
 2. **Maximum-Sized Payloads**:
    - Example: Messages with the largest allowed content for each protocol.
-   - Purpose: Tests whether, in the limit, the size of the overhead becomes negligible compared to the size of the actual message contents. (TODO: Verify this experimentally!)
+   - Purpose: Tests whether, in the limit, the size of the overhead becomes negligible compared to the size of the actual message contents.
+
+
+#### Size Comparison Table for serialized messages
+
+| Message Type     | Case     | JSON (bytes) | Custom (bytes) | Protobuf (bytes) | Custom/JSON | Protobuf/JSON |
+|------------------|----------|--------------|----------------|------------------|-------------|----------------|
+| LOGIN            | empty    | 116          | 70             | 66               | 0.6         | 0.57           |
+|                  | small    | 118          | 72             | 70               | 0.61        | 0.59           |
+|                  | medium   | 127          | 81             | 79               | 0.64        | 0.62           |
+|                  | large    | 166          | 120            | 118              | 0.72        | 0.71           |
+| CREATE_ACCOUNT   | empty    | 125          | 70             | 66               | 0.56        | 0.53           |
+|                  | small    | 127          | 72             | 70               | 0.57        | 0.55           |
+|                  | medium   | 137          | 82             | 80               | 0.6         | 0.58           |
+|                  | large    | 225          | 170            | 168              | 0.76        | 0.75           |
+| SEND_MESSAGE     | empty    | 47           | 6              | 8                | 0.13        | 0.17           |
+|                  | small    | 50           | 9              | 15               | 0.18        | 0.3            |
+|                  | medium   | 71           | 30             | 36               | 0.42        | 0.51           |
+|                  | large    | 1267         | 1226           | 1233             | 0.97        | 0.97           |
+| DELETE_ACCOUNT   | empty    | 44           | 2              | 6                | 0.05        | 0.14           |
+|                  | typical  | 50           | 2              | 6                | 0.04        | 0.12           |
+| LIST_ACCOUNTS    | empty    | 69           | 8              | 6                | 0.12        | 0.09           |
+|                  | small    | 72           | 10             | 14               | 0.14        | 0.19           |
+|                  | large    | 77           | 14             | 18               | 0.18        | 0.23           |
+| READ_MESSAGES    | empty    | 74           | 7              | 6                | 0.09        | 0.08           |
+|                  | small    | 80           | 14             | 17               | 0.17        | 0.21           |
+|                  | large    | 116          | 49             | 52               | 0.42        | 0.45           |
+| DELETE_MESSAGE   | empty    | 43           | 3              | 6                | 0.07        | 0.14           |
+|                  | small    | 44           | 7              | 9                | 0.16        | 0.2            |
+|                  | large    | 433          | 403            | 108              | 0.93        | 0.25           |
+| CHECK_USERNAME   | empty    | 40           | 4              | 0                | 0.1         | 0.0            |
+|                  | small    | 42           | 6              | 4                | 0.14        | 0.1            |
+|                  | large    | 220          | 184            | 183              | 0.84        | 0.83           |
+| QUIT             | empty    | 14           | 2              | 6                | 0.14        | 0.43           |
+
+For discussion of this table consider the following: 1) JSONs overhead (in bytes) is high, due to being text-based
+and human readable (need to store braces, colons, field names in plaintext), 2) Our custom protocol, while performing
+efficient serialization of data (same as protobuf), also includes an opcode and version code. 3) Protobuf by itself 
+(the serialization part only) is *almost* as efficient as our custom protocol, but not quite there in some scenarios
+(as outlined in above table). It does come with the massive advantage from implementation standpoint: considering
+the engineering time required to code up the application with gRPC versus writing custom binary encoding/decoding logic,
+we'd much rather deal with Protobuf. Lastly, we acknowledge that gRPC has a ton of overhead over Protobuf itself,
+by virtue of being built on top of HTTP2. This is a tradeoff for gRPC's features, and frankly, we're willing to accept it
+given how easy it was to integrate (A more comprehensive analysis could consider using `wireshark` or `tcpdump` to examine the actual
+HTTP/2 payloads sent over the network)
 
 ---
 
