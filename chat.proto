@@ -3,18 +3,19 @@ syntax = "proto3";
 package chat;
 
 service ChatService {
-  rpc Login(LoginRequest) returns (LoginResponse);
-  rpc CreateAccount(CreateAccountRequest) returns (CreateAccountResponse);
-  rpc CheckUsername(CheckUsernameRequest) returns (CheckUsernameResponse);
-  rpc ListAccounts(ListAccountsRequest) returns (ListAccountsResponse);
-  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
-  rpc ReadMessages(ReadMessagesRequest) returns (ReadMessagesResponse);
-  rpc DeleteMessage(DeleteMessageRequest) returns (DeleteMessageResponse);
-  rpc DeleteAccount(DeleteAccountRequest) returns (DeleteAccountResponse);
-  rpc Logout(LogoutRequest) returns (LogoutResponse);
-  rpc Subscribe(SubscribeRequest) returns (stream PushEvent);
+  rpc Login (LoginRequest) returns (LoginResponse);
+  rpc CreateAccount (CreateAccountRequest) returns (CreateAccountResponse);
+  rpc CheckUsername (CheckUsernameRequest) returns (CheckUsernameResponse);
+  rpc ListAccounts (ListAccountsRequest) returns (ListAccountsResponse);
+  rpc SendMessage (SendMessageRequest) returns (SendMessageResponse);
+  rpc ReadMessages (ReadMessagesRequest) returns (ReadMessagesResponse);
+  rpc DeleteMessage (DeleteMessageRequest) returns (DeleteMessageResponse);
+  rpc DeleteAccount (DeleteAccountRequest) returns (DeleteAccountResponse);
+  rpc Logout (LogoutRequest) returns (LogoutResponse);
+  rpc Subscribe (SubscribeRequest) returns (stream PushEvent);
 }
 
+// Request/Response message definitions
 message LoginRequest {
   string username = 1;
   string password_hash = 2;
@@ -60,7 +61,7 @@ message ListAccountsResponse {
 }
 
 message SendMessageRequest {
-  string username = 1; // sender
+  string username = 1;
   string to = 2;
   string content = 3;
 }
@@ -75,16 +76,7 @@ message ReadMessagesRequest {
   string username = 1;
   int32 page_size = 2;
   int32 page_num = 3;
-  string chat_partner = 4; // if empty, read unread messages
-}
-
-message ChatMessage {
-  int32 id = 1;
-  string from_ = 2;
-  string to = 3;
-  string content = 4;
-  bool read = 5;
-  int64 timestamp = 6;
+  string chat_partner = 4;
 }
 
 message ReadMessagesResponse {
@@ -129,17 +121,26 @@ message SubscribeRequest {
   string username = 1;
 }
 
+message ChatMessage {
+  int32 id = 1;
+  string from_ = 2;
+  string to = 3;
+  string content = 4;
+  bool read = 5;
+  int32 timestamp = 6;
+}
+
+// Event type for push notifications
 enum EventType {
-  UNKNOWN = 0;
-  NEW_MESSAGE = 1;
-  DELETE_MESSAGE = 2;
+  NEW_MESSAGE = 0;
+  DELETE_MESSAGE = 1;
 }
 
 message NewMessageEvent {
   int32 id = 1;
   string from_ = 2;
   string to = 3;
-  int64 timestamp = 4;
+  int32 timestamp = 4;
   string content = 5;
 }
 
@@ -149,8 +150,6 @@ message DeleteMessageEvent {
 
 message PushEvent {
   EventType event_type = 1;
-  oneof event_data {
-    NewMessageEvent new_message = 2;
-    DeleteMessageEvent delete_message = 3;
-  }
+  NewMessageEvent new_message = 2;
+  DeleteMessageEvent delete_message = 3;
 }
