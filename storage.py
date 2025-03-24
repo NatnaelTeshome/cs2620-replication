@@ -215,6 +215,13 @@ class StateMachine:
         
         return result
     
+
+    def _check_username(self, username):
+        """Check if a username exists."""
+        accounts = self.db["accounts"]
+        return True, username in accounts
+    
+    
     def _create_account(self, username, password_hash):
         """Create a new account."""
         accounts = self.db["accounts"]
