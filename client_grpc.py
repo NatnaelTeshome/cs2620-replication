@@ -30,7 +30,7 @@ class CustomProtocolClient:
         self._subscription_thread = None
         self._stop_subscription = threading.Event()
         self._max_retries = 3  # Maximum number of retries for leader redirection
-        logging.debug("LeaderAwareClient initialized.")
+        logging.debug("CustomProtocolClient initialized.")
 
     def connect_to_server(self, host: str, port: int) -> None:
         """Connect to a specific server."""
@@ -86,18 +86,13 @@ class CustomProtocolClient:
 
     def _execute_with_redirect(self, operation):
         """Execute an operation with automatic leader redirection."""
-        print("entered execute with redirect")
         retries = 0
         last_error = None
         
         while retries < self._max_retries:
             try:
-                print("entered try")
-                print(operation())
-                print("another print")
                 return operation()
             except Exception as e:
-                print("entered exception")
                 error_message = str(e)
                 last_error = e
                 
@@ -114,7 +109,6 @@ class CustomProtocolClient:
                 # If we get here, it's either not a leader error or we couldn't parse leader info
                 raise e
         
-        print("exited while")
         # If we've exhausted retries
         raise Exception(f"Failed after {retries} leader redirections. Last error: {last_error}")
 
@@ -205,7 +199,6 @@ class CustomProtocolClient:
 
     def create_account(self, username: str, password: str) -> None:
         def _operation():
-            print("Reached operation")
             req = chat_pb2.CreateAccountRequest(username=username, password_hash=self._hash_password(password))
             resp = self.stub.CreateAccount(req)
             if not resp.success:

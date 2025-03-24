@@ -50,8 +50,8 @@ def start_server(node_id, host, port, raft_port, leader_host=None, leader_port=N
     # Start the server process
     process = subprocess.Popen(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        # stdout=subprocess.PIPE,
+        # stderr=subprocess.PIPE,
         universal_newlines=True
     )
     
@@ -64,7 +64,7 @@ def start_server(node_id, host, port, raft_port, leader_host=None, leader_port=N
     }
     
     # Give it a moment to start up
-    time.sleep(1)
+    time.sleep(5)
     
     return process
 
@@ -96,6 +96,8 @@ def cleanup():
             clients[client_id].close()
         except:
             pass
+    if os.path.exists("cluster_config.json"):
+        os.remove("cluster_config.json")
     logging.info("All processes terminated")
 
 def on_new_message(message):
@@ -361,27 +363,27 @@ def run_demo():
         start_server("3", "localhost", 50053, 50063, "localhost", 50061)
         time.sleep(3)  # Give time for cluster to form
         
-        # Create clients
-        create_client("client1", "localhost", 50051)
-        create_client("client2", "localhost", 50051)
+        # # Create clients
+        # create_client("client1", "localhost", 50051)
+        # create_client("client2", "localhost", 50051)
         
-        # Run the demo steps
-        demo_create_accounts()
-        time.sleep(1)
+        # # Run the demo steps
+        # demo_create_accounts()
+        # time.sleep(1)
         
-        demo_send_messages()
-        time.sleep(1)
+        # demo_send_messages()
+        # time.sleep(1)
         
-        demo_fault_tolerance()
-        time.sleep(3)
+        # demo_fault_tolerance()
+        # time.sleep(3)
         
-        demo_persistence()
-        time.sleep(3)
+        # demo_persistence()
+        # time.sleep(3)
         
-        demo_leader_failover()
-        time.sleep(3)
+        # demo_leader_failover()
+        # time.sleep(3)
         
-        demo_new_server_addition()
+        # demo_new_server_addition()
         
         print("\n=== DEMO COMPLETED SUCCESSFULLY ===")
         

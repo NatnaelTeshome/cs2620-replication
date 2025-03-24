@@ -183,8 +183,14 @@ class StateMachine:
         """Apply a command to the state machine."""
         cmd_type = command["type"]
         result = None
-        
-        if cmd_type == "create_account":
+        # apply login
+        if cmd_type == "check_username":
+            result = self._check_username(command["username"])
+        elif cmd_type == "login":
+            result = self._login(command["username"], command["password_hash"])
+        elif cmd_type == "list_accounts":
+            result = self._list_accounts(command["username"])
+        elif cmd_type == "create_account":
             result = self._create_account(command["username"], command["password_hash"])
         elif cmd_type == "send_message":
             result = self._send_message(command["from_"], command["to"], command["content"])
@@ -194,6 +200,8 @@ class StateMachine:
             result = self._delete_message(command["username"], command["message_ids"])
         elif cmd_type == "delete_account":
             result = self._delete_account(command["username"])
+        elif cmd_type == "config_change":
+            result = self._config_change(command[])
         else:
             logging.error(f"Unknown command type: {cmd_type}")
             return False, "Unknown command type."
@@ -349,17 +357,17 @@ class StateMachine:
         
         return True, f"Account '{username}' deleted."
     
-    def get_accounts(self):
-        """Get a copy of all accounts."""
-        return dict(self.db["accounts"])
+    # def get_accounts(self):
+    #     """Get a copy of all accounts."""
+    #     return dict(self.db["accounts"])
     
-    def get_id_to_message(self):
-        """Get a copy of the ID to message mapping."""
-        return dict(self.db["id_to_message"])
+    # def get_id_to_message(self):
+    #     """Get a copy of the ID to message mapping."""
+    #     return dict(self.db["id_to_message"])
     
-    def get_global_message_id(self):
-        """Get the current global message ID."""
-        return self.db["global_message_id"]
+    # def get_global_message_id(self):
+    #     """Get the current global message ID."""
+    #     return self.db["global_message_id"]
     
     def get_last_snapshot_index(self):
         """Get the log index of the last snapshot."""

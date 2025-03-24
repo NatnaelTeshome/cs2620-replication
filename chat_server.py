@@ -112,7 +112,7 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
         )
     
     def CheckUsername(self, request, context):
-        print("reached server username")
+        print("reached server username", flush=True)
         username = request.username
         
         # Create a check_username command
@@ -417,7 +417,7 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
 
 
 class ChatServer:
-    def __init__(self, node_id, config_file=None, host=None, port=None, raft_port=None):
+    def __init__(self, node_id, config_file=None, host=None, port=None, raft_port=None, make_leader=False):
         # Load or create cluster configuration
         self.config = ClusterConfig(config_file, node_id)
         
@@ -442,7 +442,7 @@ class ChatServer:
         self.state_machine = storage.StateMachine(node_id)
         
         # Initialize Raft node
-        self.raft_node = raft.RaftNode(node_id, self.config, self.state_machine)
+        self.raft_node = raft.RaftNode(node_id, self.config, self.state_machine, make_leader)
         
         # Initialize Chat service
         self.servicer = ChatServicer(node_id, self.config, self.raft_node)
@@ -461,6 +461,7 @@ class ChatServer:
         """Join an existing cluster by contacting the leader."""
         # Connect to the leader
         channel = grpc.insecure_channel(f"{leader_host}:{leader_port}")
+        print("BUG", leader_host, leader_port, flush=True)
         stub = raft_pb2_grpc.RaftServiceStub(channel)
         
         # Send a request to add this node to the cluster
@@ -493,12 +494,14 @@ class ChatServer:
 
 def start_server(node_id, config_file=None, host=None, port=None, raft_port=None, leader_host=None, leader_port=None):
     """Start a chat server."""
-    server = ChatServer(node_id, config_file, host, port, raft_port)
-    
+    print("port", port, flush=True)
+    server = None 
     # If leader information is provided, join the cluster
     if leader_host and leader_port:
+        server = ChatServer(node_id, config_file, host, port, raft_port)
         server.join_cluster(leader_host, leader_port)
-    
+    else:
+        server = ChatServer(node_id, config_file, host, port, raft_port, True)
     return server
 
 

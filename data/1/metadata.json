@@ -1,6 +1,6 @@
 {
-  "current_term": 16,
-  "voted_for": "1",
-  "commit_index": 0,
-  "last_applied": 0
+  "current_term": 0,
+  "voted_for": null,
+  "commit_index": 1,
+  "last_applied": 1
 }

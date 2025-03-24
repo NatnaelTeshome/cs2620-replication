@@ -22,8 +22,8 @@ logging.basicConfig(
 )
 
 # Constants
-ELECTION_TIMEOUT_MIN = 150  # milliseconds
-ELECTION_TIMEOUT_MAX = 300  # milliseconds
+ELECTION_TIMEOUT_MIN = 15000000  # milliseconds
+ELECTION_TIMEOUT_MAX = 30000000  # milliseconds
 HEARTBEAT_INTERVAL = 100    # milliseconds
 
 # Raft node states
@@ -32,7 +32,7 @@ CANDIDATE = "CANDIDATE"
 LEADER = "LEADER"
 
 class RaftNode(raft_pb2_grpc.RaftServiceServicer):
-    def __init__(self, node_id, config, state_machine):
+    def __init__(self, node_id, config, state_machine, make_leader):
         self.node_id = node_id
         self.config = config
         self.state_machine = state_machine
@@ -43,6 +43,9 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
         # Initialize volatile state
         self.state = FOLLOWER
         self.current_leader = None
+        if make_leader:
+            self.state = LEADER
+            self.current_leader = node_id
         self.last_heartbeat = time.time()
         self.votes_received = set()
         
@@ -77,6 +80,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
                 channel = grpc.insecure_channel(f"{info['host']}:{info['raft_port']}")
                 self.node_stubs[nid] = raft_pb2_grpc.RaftServiceStub(channel)
         
+        print(f"Raft port: {node_info['raft_port']}")
         # Start background tasks
         self.running = True
         self.election_thread = threading.Thread(target=self._run_election_timer)
@@ -432,8 +436,9 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
             
             # Accept the leader (either same term or higher term)
             if request.term >= current_term:
-                self._become_follower(request.term)
-                self.current_leader = request.leader_id
+                if self.current_leader != request.leader_id:
+                    self._become_follower(request.term)
+                    self.current_leader = request.leader_id
             
             # Reset election timer since we heard from the leader
             self._reset_election_timer()
@@ -472,6 +477,8 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
     def AddNode(self, request, context):
         with self.state_lock:
             if self.state != LEADER:
+                _, node_info = self.config.get_current_node()
+                print("state", self.state, node_info["port"], node_info["raft_port"])
                 return raft_pb2.AddNodeResponse(
                     success=False,
                     message=f"Not the leader. Current leader is {self.current_leader}"
