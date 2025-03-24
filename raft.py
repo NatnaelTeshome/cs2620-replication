@@ -54,7 +54,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
         self.match_index = {}
         
         # Command queue for client requests
-        # self.command_queue = asyncio.Queue()
+        self.command_queue = asyncio.Queue()
         
         # Locks
         self.state_lock = threading.RLock()
@@ -133,7 +133,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
                     # Apply commands to state machine
                     for i in range(last_applied + 1, commit_index + 1):
                         entry = self.persistent_log.get_entries(i, i + 1)[0]
-                        if "command" in entry:
+                        if "command" in entry and (entry["command"]["type"] != "config_change"):
                             result = self.state_machine.apply_command(entry["command"], log_index=i)
                             self._resolve_command_future(i, result)
 

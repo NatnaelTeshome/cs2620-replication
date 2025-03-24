@@ -200,8 +200,8 @@ class StateMachine:
             result = self._delete_message(command["username"], command["message_ids"])
         elif cmd_type == "delete_account":
             result = self._delete_account(command["username"])
-        elif cmd_type == "config_change":
-            result = self._config_change(command[])
+        # elif cmd_type == "config_change":
+        #     result = self._config_change(command[])
         else:
             logging.error(f"Unknown command type: {cmd_type}")
             return False, "Unknown command type."
@@ -214,14 +214,50 @@ class StateMachine:
                 self._save_snapshot(log_index)
         
         return result
-    
 
     def _check_username(self, username):
         """Check if a username exists."""
         accounts = self.db["accounts"]
-        return True, username in accounts
-    
-    
+        
+        exists = username in accounts
+        message = "Username exists." if exists else "Username does not exist."
+        
+        return exists, message
+
+    def _login(self, username, password_hash):
+        """Log in to an account."""
+        accounts = self.db["accounts"]
+        
+        if username not in accounts:
+            return False, "No such user.", 0
+        
+        if accounts[username]["password_hash"] != password_hash:
+            return False, "Incorrect password.", 0
+        
+        # Count unread messages
+        unread = sum(1 for m in accounts[username]["messages"] if not m["read"])
+        
+        return True, f"Logged in as '{username}'. Unread messages: {unread}.", unread
+
+    def _list_accounts(self, username, pattern="*", page_size=10, page_num=1):
+        """List accounts matching a pattern."""
+        accounts = self.db["accounts"]
+        
+        if username not in accounts:
+            return False, "Please log in first.", [], 0
+        
+        import fnmatch
+        matching = [acct for acct in accounts.keys() if fnmatch.fnmatch(acct, pattern)]
+        matching.sort()
+        
+        total = len(matching)
+        start = (page_num - 1) * page_size
+        end = start + page_size
+        
+        page_accounts = matching[start:end] if start < total else []
+        
+        return True, "", page_accounts, total
+
     def _create_account(self, username, password_hash):
         """Create a new account."""
         accounts = self.db["accounts"]

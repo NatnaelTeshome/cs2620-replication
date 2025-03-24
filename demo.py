@@ -363,9 +363,9 @@ def run_demo():
         start_server("3", "localhost", 50053, 50063, "localhost", 50061)
         time.sleep(3)  # Give time for cluster to form
         
-        # # Create clients
-        # create_client("client1", "localhost", 50051)
-        # create_client("client2", "localhost", 50051)
+        # Create clients
+        create_client("client1", "localhost", 50051)
+        create_client("client2", "localhost", 50051)
         
         # # Run the demo steps
         # demo_create_accounts()
