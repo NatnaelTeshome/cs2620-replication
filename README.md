@@ -1,1 +1,1 @@
-# cs2620-wire-protocols
+# cs2620-replication
