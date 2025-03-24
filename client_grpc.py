@@ -188,11 +188,8 @@ class CustomProtocolClient:
 
     def account_exists(self, username: str) -> bool:
         def _operation():
-            print("reached account exists")
             req = chat_pb2.CheckUsernameRequest(username=username)
-            print("request object made")
             resp = self.stub.CheckUsername(req)
-            print("response object made")
             return resp.exists
             
         return self._execute_with_redirect(_operation)

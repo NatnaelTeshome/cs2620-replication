@@ -112,7 +112,6 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
         )
     
     def CheckUsername(self, request, context):
-        print("reached server username", flush=True)
         username = request.username
         
         # Create a check_username command
@@ -461,7 +460,6 @@ class ChatServer:
         """Join an existing cluster by contacting the leader."""
         # Connect to the leader
         channel = grpc.insecure_channel(f"{leader_host}:{leader_port}")
-        print("BUG", leader_host, leader_port, flush=True)
         stub = raft_pb2_grpc.RaftServiceStub(channel)
         
         # Send a request to add this node to the cluster

@@ -80,7 +80,6 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
                 channel = grpc.insecure_channel(f"{info['host']}:{info['raft_port']}")
                 self.node_stubs[nid] = raft_pb2_grpc.RaftServiceStub(channel)
         
-        print(f"Raft port: {node_info['raft_port']}")
         # Start background tasks
         self.running = True
         self.election_thread = threading.Thread(target=self._run_election_timer)
@@ -145,19 +144,17 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
     def _resolve_command_future(self, index, result):
         """Resolve any futures waiting for this command index."""
         # Iterate through the command queue to find matching futures
-        resolved_items = []
         pending_items = []
         
         # Empty the queue and process each item
         while not self.command_queue.empty():
             try:
                 cmd_index, future = self.command_queue.get_nowait()
-                
+                print("Reached resolve_command future", cmd_index, index)
                 # If this is the future we're looking for
                 if cmd_index == index:
                     if not future.done():
                         future.set_result(result)
-                    resolved_items.append((cmd_index, future))
                 else:
                     # Put back items we're not resolving yet
                     pending_items.append((cmd_index, future))
@@ -353,7 +350,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
                 entries = self.persistent_log.get_entries(n, n + 1)
                 if entries and entries[0]["term"] == current_term:
                     self.persistent_log.set_commit_index(n)
-                    logging.debug(f"Advanced commit index to {n}")
+                    logging.debug(f"Advanced commit index to {n} {self.state}")
     
     def _recover_from_snapshot(self):
         """Recover state by applying logs since the last snapshot."""
@@ -395,8 +392,9 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
             
             # Append to local log
             last_index = self.persistent_log.get_last_log_index()
+            print("Last index", last_index)
             success, new_last_index = self.persistent_log.append_entries([entry], last_index + 1)
-            
+            print("new last index", new_last_index)            
             if not success:
                 return False, "Failed to append to local log"
             
@@ -409,7 +407,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
             
             # Wait for the result with a timeout
             try:
-                result = await asyncio.wait_for(future, timeout=5.0)
+                result = await asyncio.wait_for(future, timeout=30.0)
                 return True, result
             except asyncio.TimeoutError:
                 return False, "Timeout waiting for command to be committed"

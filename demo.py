@@ -367,9 +367,9 @@ def run_demo():
         create_client("client1", "localhost", 50051)
         create_client("client2", "localhost", 50051)
         
-        # # Run the demo steps
-        # demo_create_accounts()
-        # time.sleep(1)
+        # Run the demo steps
+        demo_create_accounts()
+        time.sleep(1)
         
         # demo_send_messages()
         # time.sleep(1)

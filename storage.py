@@ -82,7 +82,7 @@ class PersistentLog:
         # Save to disk
         self._save_log()
         
-        return True, len(self.log)
+        return True, len(self.log) - 1
     
     def get_entries(self, start_index, end_index=None):
         """Get log entries from start_index (inclusive) to end_index (exclusive)."""
