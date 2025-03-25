@@ -25,7 +25,7 @@ logging.basicConfig(
 # Constants
 ELECTION_TIMEOUT_MIN = 15000000  # milliseconds
 ELECTION_TIMEOUT_MAX = 30000000  # milliseconds
-HEARTBEAT_INTERVAL = 100    # milliseconds
+HEARTBEAT_INTERVAL = 100000    # milliseconds
 
 # Raft node states
 FOLLOWER = "FOLLOWER"
@@ -85,13 +85,13 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
 
         # Start background tasks
         self.running = True
-        # self.election_thread = threading.Thread(target=self._run_election_timer)
-        # self.election_thread.daemon = True
-        # self.election_thread.start()
+        self.election_thread = threading.Thread(target=self._run_election_timer)
+        self.election_thread.daemon = True
+        self.election_thread.start()
         
-        # self.append_entries_thread = threading.Thread(target=self._run_append_entries)
-        # self.append_entries_thread.daemon = True
-        # self.append_entries_thread.start()
+        self.append_entries_thread = threading.Thread(target=self._run_append_entries)
+        self.append_entries_thread.daemon = True
+        self.append_entries_thread.start()
         
         # self.apply_command_thread = threading.Thread(target=self._run_apply_command)
         # self.apply_command_thread.daemon = True
@@ -100,7 +100,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
         logging.info(f"Raft node {self.node_id} started")
     
     def _run_election_timer(self):
-        # print("Entered election timer")
+        print("Entered election timer")
         """Background thread to handle election timeout and start elections."""
         while self.running:
             with self.state_lock:
@@ -113,13 +113,14 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
                         self._start_election()
             
             # Sleep a small amount to avoid busy waiting
-            time.sleep(0.01)
+            time.sleep(10)
     
     def _run_append_entries(self):
         print("Entered run append entries", self.node_id)
         """Background thread for leaders to send AppendEntries RPCs."""
         while self.running:
             with self.state_lock:
+                print("Heartbeat time", time.time())
                 if self.state == LEADER:
                     self._send_append_entries()
             
@@ -354,7 +355,8 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
                     # If append failed, decrement next index and retry
                     self.next_index[node_id] = max(0, self.next_index[node_id] - 1)
         except Exception as e:
-            logging.error(f"Error in AppendEntries per node for {node_id}: {e}")
+            
+            logging.debug(f"Error in AppendEntries per node for {node_id}: {e}")
     
     def _check_commit_index(self):
         print("Entered check commit index", self.node_id)
@@ -564,8 +566,8 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
             # Append entries to log
             if entries:
                 success, _ = self.persistent_log.append_entries(entries, prev_log_index + 1)
-                print("All entries", self.node_id, self.persistent_log.get_entries(0, self.persistent_log.get_last_log_index() + 1))
-                print("config", self.config.get_nodes())
+                # print("All entries", self.node_id, self.persistent_log.get_entries(0, self.persistent_log.get_last_log_index() + 1))
+                # print("config", self.config.get_nodes())
                 if not success:
                     return raft_pb2.AppendEntriesResponse(term=current_term, success=False)
             
@@ -708,9 +710,9 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
         """Stop the Raft node."""
         self.running = False
         self.server.stop(0)
-        # if self.election_thread.is_alive():
-        #     self.election_thread.join(timeout=1.0)
-        # if self.append_entries_thread.is_alive():
-        #     self.append_entries_thread.join(timeout=1.0)
+        if self.election_thread.is_alive():
+            self.election_thread.join(timeout=1.0)
+        if self.append_entries_thread.is_alive():
+            self.append_entries_thread.join(timeout=1.0)
         # if self.apply_command_thread.is_alive():
         #     self.apply_command_thread.join(timeout=1.0)

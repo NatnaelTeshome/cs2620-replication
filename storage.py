@@ -194,14 +194,13 @@ class StateMachine:
             result = self._create_account(command["username"], command["password_hash"])
         elif cmd_type == "send_message":
             result = self._send_message(command["from_"], command["to"], command["content"])
-        elif cmd_type == "read_message":
-            result = self._read_message(command["username"], command["message_id"])
+        elif cmd_type == "read_messages":
+            result = self._read_messages(command["username"], command.get("page_size", 10), 
+                                        command.get("page_num", 1), command.get("chat_partner", None))
         elif cmd_type == "delete_message":
             result = self._delete_message(command["username"], command["message_ids"])
         elif cmd_type == "delete_account":
             result = self._delete_account(command["username"])
-        # elif cmd_type == "config_change":
-        #     result = self._config_change(command[])
         else:
             logging.error(f"Unknown command type: {cmd_type}")
             return False, "Unknown command type."
@@ -309,30 +308,64 @@ class StateMachine:
         
         return True, f"Message sent to '{recipient}': {content}", global_message_id
     
-    def _read_message(self, username, message_id):
-        """Mark a message as read."""
+    def _read_messages(self, username, page_size=10, page_num=1, chat_partner=None):
+        """Read messages for a user, either from a conversation or unread messages."""
         accounts = self.db["accounts"]
         
         if username not in accounts:
-            return False, "User does not exist."
+            return False, "Please log in first.", [], 0, 0, 0, 0
         
         user_data = accounts[username]
+        messages = []
+        total_msgs = 0
+        remaining = 0
+        total_unread = 0
+        remaining_unread = 0
         
-        # Mark message as read in messages list
-        for m in user_data.get("messages", []):
-            if m["id"] == message_id:
+        if chat_partner:
+            # Read conversation with specific chat partner
+            conv = user_data.get("conversations", {}).get(chat_partner, [])
+            total_msgs = len(conv)
+            start = (page_num - 1) * page_size
+            end = min(start + page_size, total_msgs)
+            
+            messages = conv[start:end] if start < total_msgs else []
+            
+            # Mark messages as read in conversation and in messages list
+            for m in messages:
                 m["read"] = True
-                
-                # Also mark in conversations
+            
+            for m in user_data.get("messages", []):
+                if m["id"] in {msg["id"] for msg in messages}:
+                    m["read"] = True
+            
+            remaining = max(0, total_msgs - end)
+            
+            return True, f"Read conversation with {chat_partner}.", messages, total_msgs, remaining, 0, 0
+        else:
+            # Read unread messages
+            unread = [m for m in user_data.get("messages", []) if not m["read"]]
+            total_unread = len(unread)
+            start = (page_num - 1) * page_size
+            end = min(start + page_size, total_unread)
+            
+            messages = unread[start:end] if start < total_unread else []
+            
+            # Mark them as read
+            for m in messages:
+                m["read"] = True
+            
+            # Also mark in conversations
+            for m in messages:
                 sender = m["from_"]
                 if sender in user_data.get("conversations", {}):
                     for conv_msg in user_data["conversations"][sender]:
-                        if conv_msg["id"] == message_id:
+                        if conv_msg["id"] == m["id"]:
                             conv_msg["read"] = True
-                
-                return True, "Message marked as read."
-        
-        return False, "Message not found."
+            
+            remaining_unread = max(0, total_unread - end)
+            
+            return True, "Read unread messages.", messages, 0, 0, total_unread, remaining_unread
     
     def _delete_message(self, username, message_ids):
         """Delete messages for a user."""

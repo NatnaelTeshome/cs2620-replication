@@ -156,11 +156,11 @@ def demo_create_accounts():
     # Check if usernames exist
     try:
         alice_exists = client.account_exists("alice")
-        # bob_exists = client.account_exists("bob")
+        bob_exists = client.account_exists("bob")
         # charlie_exists = client.account_exists("charlie")
         
         print(f"User 'alice' exists: {alice_exists}")
-        # print(f"User 'bob' exists: {bob_exists}")
+        print(f"User 'bob' exists: {bob_exists}")
         # print(f"User 'charlie' exists: {charlie_exists}")
         
         # Create accounts if they don't exist
@@ -168,9 +168,9 @@ def demo_create_accounts():
             client.create_account("alice", "password")
             print("Created account for 'alice'")
         
-        # if not bob_exists:
-        #     client.create_account("bob", "password")
-        #     print("Created account for 'bob'")
+        if not bob_exists:
+            client.create_account("bob", "password")
+            print("Created account for 'bob'")
             
         # if not charlie_exists:
         #     client.create_account("charlie", "password")
@@ -240,6 +240,10 @@ def demo_fault_tolerance():
         kill_server("2")
         time.sleep(2)
         
+        # TODO: redundant
+        clients["client1"].login("alice", "password")
+        print("Logged in as 'alice' on client1")
+
         # Try sending a message with one node down
         print("\nSending message with one node down...")
         msg_id = clients["client1"].send_message("bob", "This message is sent with one node down!")
@@ -385,6 +389,14 @@ def run_demo():
         start_server("3", "localhost", 50053, 50063, "localhost", 50061)
         time.sleep(3)  # Give time for cluster to form
         print("Started server node 3 (follower)")
+        # add another server
+        start_server("4", "localhost", 50054, 50064, "localhost", 50061)
+        time.sleep(3)  # Give time for cluster to form
+        print("Started server node 4 (follower)")
+        # add another server
+        start_server("5", "localhost", 50055, 50065, "localhost", 50061)
+        time.sleep(3)  # Give time for cluster to form
+        print("Started server node 5 (follower)")
         
         # Create clients
         create_client("client1", "localhost", 50051)
@@ -393,10 +405,10 @@ def run_demo():
         # # Run the demo steps
         demo_check_account_exists()
         demo_create_accounts()
-        # time.sleep(1)
+        time.sleep(1)
         
-        # demo_send_messages()
-        # time.sleep(1)
+        demo_send_messages()
+        time.sleep(1)
         
         # demo_fault_tolerance()
         # time.sleep(3)
