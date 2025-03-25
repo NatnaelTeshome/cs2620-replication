@@ -492,7 +492,6 @@ class ChatServer:
 
 def start_server(node_id, config_file=None, host=None, port=None, raft_port=None, leader_host=None, leader_port=None):
     """Start a chat server."""
-    print("port", port, flush=True)
     server = None 
     # If leader information is provided, join the cluster
     if leader_host and leader_port:

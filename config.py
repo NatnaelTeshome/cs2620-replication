@@ -17,7 +17,7 @@ def get_local_ip():
 
 class ClusterConfig:
     def __init__(self, config_file=None, node_id=None):
-        self.config_file = config_file or "cluster_config.json"
+        self.config_file = config_file or f"cluster_config_{node_id}.json"
         self.node_id = node_id
         self.load_config()
     

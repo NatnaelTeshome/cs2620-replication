@@ -76,11 +76,13 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
         
         # Initialize all node connections
         self.node_stubs = {}
+        print("self.config", self.config.get_nodes())
         for nid, info in self.config.get_nodes().items():
             if nid != self.node_id:
                 channel = grpc.insecure_channel(f"{info['host']}:{info['raft_port']}")
                 self.node_stubs[nid] = raft_pb2_grpc.RaftServiceStub(channel)
-        
+        print(f"Node stubs: {self.node_stubs} for node {self.node_id}")
+
         # Start background tasks
         self.running = True
         self.election_thread = threading.Thread(target=self._run_election_timer)
@@ -139,7 +141,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
                     # Apply commands to state machine
                     for i in range(last_applied + 1, commit_index + 1):
                         entry = self.persistent_log.get_entries(i, i + 1)[0]
-                        if "command" in entry and (entry["command"]["type"] != "config_change"):
+                        if "command" in entry:
                             result = self.state_machine.apply_command(entry["command"], log_index=i)
                             self._resolve_command_future(i, result)
 
@@ -201,6 +203,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
             last_log_index = self.persistent_log.get_last_log_index()
             last_log_term = self.persistent_log.get_last_log_term()
             
+            # TODO: do followers have self.node_stubs?
             for node_id, stub in self.node_stubs.items():
                 try:
                     request = raft_pb2.RequestVoteRequest(
@@ -210,6 +213,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
                         last_log_term=last_log_term
                     )
                     
+                    # TODO: Should we block here too? Is it possible to await all threads (if so how does it change the synchronous function?)
                     # Send request vote in a separate thread to avoid blocking
                     threading.Thread(
                         target=self._request_vote_thread,
@@ -221,8 +225,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
     def _request_vote_thread(self, node_id, stub, request):
         """Thread to send a RequestVote RPC to a node."""
         try:
-            response = stub.RequestVote(request)
-            
+            response = stub.RequestVote(request)            
             with self.state_lock:
                 # If we're no longer a candidate or term has changed, ignore the response
                 if self.state != CANDIDATE or response.term != self.persistent_log.get_current_term():
@@ -306,6 +309,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
                 leader_commit=self.persistent_log.get_commit_index()
             )
             
+            # TODO: async or sync?
             # Send request in a separate thread
             threading.Thread(
                 target=self._append_entries_per_node,
@@ -369,6 +373,26 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
                         print(f"Current thread: {threading.current_thread().name} Check commit index")
                         self._run_apply_command()
                     logging.debug(f"Advanced commit index to {n} {self.state}")
+
+    def _process_config_change(self, command):
+        """Process a configuration change command on follower nodes."""
+        if command["action"] == "add":
+            node_id = command["node_id"]
+            host = command["host"]
+            port = command["port"]
+            raft_port = command["raft_port"]
+            
+            # Update configuration
+            self.config.add_node(node_id, host, port, raft_port)
+            
+            # Create a new stub for communicating with the node
+            if node_id != self.node_id and node_id not in self.node_stubs:
+                try:
+                    channel = grpc.insecure_channel(f"{host}:{raft_port}")
+                    self.node_stubs[node_id] = raft_pb2_grpc.RaftServiceStub(channel)
+                    logging.info(f"Node {self.node_id} added stub for new node {node_id}")
+                except Exception as e:
+                    logging.error(f"Error creating stub for node {node_id}: {e}")
     
     def _recover_from_snapshot(self):
         """Recover state by applying logs since the last snapshot."""

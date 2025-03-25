@@ -96,8 +96,9 @@ def cleanup():
             clients[client_id].close()
         except:
             pass
-    if os.path.exists("cluster_config.json"):
-        os.remove("cluster_config.json")
+    for i in range(1, 4):
+        if os.path.exists(f"cluster_config_{i}.json"):
+            os.remove(f"cluster_config_{i}.json")
     logging.info("All processes terminated")
 
 def on_new_message(message):
@@ -377,10 +378,13 @@ def run_demo():
         # Start a cluster with 3 nodes
         start_server("1", "localhost", 50051, 50061)
         time.sleep(1)
+        print("Started server node 1 (leader)")
         start_server("2", "localhost", 50052, 50062, "localhost", 50061)
         time.sleep(1)
+        print("Started server node 2 (follower)")
         start_server("3", "localhost", 50053, 50063, "localhost", 50061)
         time.sleep(3)  # Give time for cluster to form
+        print("Started server node 3 (follower)")
         
         # Create clients
         create_client("client1", "localhost", 50051)
