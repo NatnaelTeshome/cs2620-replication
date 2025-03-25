@@ -49,6 +49,11 @@ class RaftServiceStub(object):
                 request_serializer=raft__pb2.AddNodeRequest.SerializeToString,
                 response_deserializer=raft__pb2.AddNodeResponse.FromString,
                 _registered_method=True)
+        self.UpdateClusterConfig = channel.unary_unary(
+                '/raft.RaftService/UpdateClusterConfig',
+                request_serializer=raft__pb2.ClusterConfigUpdate.SerializeToString,
+                response_deserializer=raft__pb2.UpdateClusterConfigResponse.FromString,
+                _registered_method=True)
 
 
 class RaftServiceServicer(object):
@@ -72,6 +77,12 @@ class RaftServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def UpdateClusterConfig(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_RaftServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -89,6 +100,11 @@ def add_RaftServiceServicer_to_server(servicer, server):
                     servicer.AddNode,
                     request_deserializer=raft__pb2.AddNodeRequest.FromString,
                     response_serializer=raft__pb2.AddNodeResponse.SerializeToString,
+            ),
+            'UpdateClusterConfig': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateClusterConfig,
+                    request_deserializer=raft__pb2.ClusterConfigUpdate.FromString,
+                    response_serializer=raft__pb2.UpdateClusterConfigResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -172,6 +188,33 @@ class RaftService(object):
             '/raft.RaftService/AddNode',
             raft__pb2.AddNodeRequest.SerializeToString,
             raft__pb2.AddNodeResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateClusterConfig(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/raft.RaftService/UpdateClusterConfig',
+            raft__pb2.ClusterConfigUpdate.SerializeToString,
+            raft__pb2.UpdateClusterConfigResponse.FromString,
             options,
             channel_credentials,
             insecure,

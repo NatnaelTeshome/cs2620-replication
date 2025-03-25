@@ -6,6 +6,7 @@ service RaftService {
   rpc RequestVote (RequestVoteRequest) returns (RequestVoteResponse);
   rpc AppendEntries (AppendEntriesRequest) returns (AppendEntriesResponse);
   rpc AddNode (AddNodeRequest) returns (AddNodeResponse);
+  rpc UpdateClusterConfig (ClusterConfigUpdate) returns (UpdateClusterConfigResponse);
 }
 
 message RequestVoteRequest {
@@ -61,6 +62,3 @@ message UpdateClusterConfigResponse {
   bool success = 1;
   string message = 2;
 }
-
-// Add to the RaftService
-rpc UpdateClusterConfig (ClusterConfigUpdate) returns (UpdateClusterConfigResponse);
