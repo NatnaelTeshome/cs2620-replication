@@ -125,6 +125,25 @@ def create_client(client_id, host, port):
         logging.error(f"Failed to create client {client_id}: {e}")
         return None
 
+def demo_check_account_exists():
+    """Check if an account exists."""
+    global demo_step
+    demo_step += 1
+    print(f"\n=== STEP {demo_step}: CHECKING USER ACCOUNTS ===")
+    
+    client = clients["client1"]
+    
+    # Check if usernames exist
+    try:
+        alice_exists = client.account_exists("alice")
+        bob_exists = client.account_exists("bob")
+        
+        print(f"User 'alice' exists: {alice_exists}")
+        print(f"User 'bob' exists: {bob_exists}")
+            
+    except Exception as e:
+        print(f"Error during username checking: {e}")
+
 def demo_create_accounts():
     """Demo creating user accounts."""
     global demo_step
@@ -366,10 +385,11 @@ def run_demo():
         # Create clients
         create_client("client1", "localhost", 50051)
         create_client("client2", "localhost", 50051)
-        
-        # Run the demo steps
-        demo_create_accounts()
-        time.sleep(1)
+
+        # # Run the demo steps
+        demo_check_account_exists()
+        # demo_create_accounts()
+        # time.sleep(1)
         
         # demo_send_messages()
         # time.sleep(1)

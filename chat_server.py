@@ -122,7 +122,7 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
         
         # Submit the command to Raft and wait for the result
         success, result = self.loop.run_until_complete(self.raft_node.submit_command(command))
-        
+        print("Result of chat_server", success, result)
         if not success:
             return chat_pb2.CheckUsernameResponse(
                 exists=False,

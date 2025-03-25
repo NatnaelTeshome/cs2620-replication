@@ -6,6 +6,7 @@ import grpc
 import asyncio
 from concurrent import futures
 import json
+import os
 
 # Import our modules
 import storage
@@ -123,11 +124,17 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
     
     def _run_apply_command(self):
         """Background thread to apply committed entries to the state machine."""
+        print(f"Current process: {os.getpid()} Run appl command")
+        print(f"Current thread: {threading.current_thread().name} Run appl command")
+        thread_taken = False
         while self.running:
             with self.state_lock:
+                if not thread_taken:
+                    print(f"Current thread: {threading.current_thread().name} Run appl command thread taken")
+                    thread_taken = True
                 commit_index = self.persistent_log.get_commit_index()
                 last_applied = self.persistent_log.get_last_applied()
-                
+                # print(f"Current thread: {threading.current_thread().name} Run appl command", commit_index, last_applied)
                 if commit_index > last_applied:
                     # Apply commands to state machine
                     for i in range(last_applied + 1, commit_index + 1):
@@ -154,12 +161,18 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
                 # If this is the future we're looking for
                 if cmd_index == index:
                     if not future.done():
+                        print("Resolving future", result)
                         future.set_result(result)
                 else:
-                    # Put back items we're not resolving yet
-                    pending_items.append((cmd_index, future))
+                    if not future.done():
+                        # Put back items we're not resolving yet
+                        pending_items.append((cmd_index, future))
             except asyncio.QueueEmpty:
                 break
+
+        # Put back pending items
+        for item in pending_items:
+            self.command_queue.put_nowait(item)
 
     def _reset_election_timer(self):
         """Reset the election timer."""
@@ -295,11 +308,11 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
             
             # Send request in a separate thread
             threading.Thread(
-                target=self._append_entries_thread,
+                target=self._append_entries_per_node,
                 args=(node_id, stub, request)
             ).start()
     
-    def _append_entries_thread(self, node_id, stub, request):
+    def _append_entries_per_node(self, node_id, stub, request):
         """Thread to send an AppendEntries RPC to a node."""
         try:
             response = stub.AppendEntries(request)
@@ -328,7 +341,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
                     # If append failed, decrement next index and retry
                     self.next_index[node_id] = max(0, self.next_index[node_id] - 1)
         except Exception as e:
-            logging.error(f"Error in AppendEntries thread for {node_id}: {e}")
+            logging.error(f"Error in AppendEntries per node for {node_id}: {e}")
     
     def _check_commit_index(self):
         """Check if we can advance the commit index."""
@@ -350,6 +363,11 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
                 entries = self.persistent_log.get_entries(n, n + 1)
                 if entries and entries[0]["term"] == current_term:
                     self.persistent_log.set_commit_index(n)
+                    # Apply command to state machine
+                    entry = entries[0]
+                    if "command" in entry:
+                        print(f"Current thread: {threading.current_thread().name} Check commit index")
+                        self._run_apply_command()
                     logging.debug(f"Advanced commit index to {n} {self.state}")
     
     def _recover_from_snapshot(self):
@@ -376,7 +394,10 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
 
     async def submit_command(self, command):
         """Submit a command to the Raft cluster."""
+        print("Locking state")
         with self.state_lock:
+            print("Locked state")
+            print(f"Current thread: {threading.current_thread().name} Submit command")
             if self.state != LEADER:
                 if self.current_leader:
                     # Redirect to current leader
@@ -393,6 +414,9 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
             # Append to local log
             last_index = self.persistent_log.get_last_log_index()
             print("Last index", last_index)
+            # Print logs so far
+            for i in range(last_index + 1):
+                print(self.persistent_log.get_entries(i, i + 1)[0])
             success, new_last_index = self.persistent_log.append_entries([entry], last_index + 1)
             print("new last index", new_last_index)            
             if not success:
@@ -401,13 +425,14 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
             # Wait for command to be committed
             future = asyncio.Future()
             self.command_queue.put_nowait((new_last_index, future))
-            
+            print("Future set?", future.done())
             # Send append entries to all followers
             self._send_append_entries()
-            
             # Wait for the result with a timeout
             try:
+                print("Waiting for future", future.done())
                 result = await asyncio.wait_for(future, timeout=30.0)
+                print("Waited for future", future.done())
                 return True, result
             except asyncio.TimeoutError:
                 return False, "Timeout waiting for command to be committed"

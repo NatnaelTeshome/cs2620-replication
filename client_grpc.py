@@ -190,6 +190,7 @@ class CustomProtocolClient:
         def _operation():
             req = chat_pb2.CheckUsernameRequest(username=username)
             resp = self.stub.CheckUsername(req)
+            print("Client call", resp.exists, resp.message)
             return resp.exists
             
         return self._execute_with_redirect(_operation)
