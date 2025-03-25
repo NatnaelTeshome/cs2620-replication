@@ -85,21 +85,22 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
 
         # Start background tasks
         self.running = True
-        self.election_thread = threading.Thread(target=self._run_election_timer)
-        self.election_thread.daemon = True
-        self.election_thread.start()
+        # self.election_thread = threading.Thread(target=self._run_election_timer)
+        # self.election_thread.daemon = True
+        # self.election_thread.start()
         
-        self.append_entries_thread = threading.Thread(target=self._run_append_entries)
-        self.append_entries_thread.daemon = True
-        self.append_entries_thread.start()
+        # self.append_entries_thread = threading.Thread(target=self._run_append_entries)
+        # self.append_entries_thread.daemon = True
+        # self.append_entries_thread.start()
         
-        self.apply_command_thread = threading.Thread(target=self._run_apply_command)
-        self.apply_command_thread.daemon = True
-        self.apply_command_thread.start()
+        # self.apply_command_thread = threading.Thread(target=self._run_apply_command)
+        # self.apply_command_thread.daemon = True
+        # self.apply_command_thread.start()
         
         logging.info(f"Raft node {self.node_id} started")
     
     def _run_election_timer(self):
+        # print("Entered election timer")
         """Background thread to handle election timeout and start elections."""
         while self.running:
             with self.state_lock:
@@ -115,6 +116,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
             time.sleep(0.01)
     
     def _run_append_entries(self):
+        print("Entered run append entries", self.node_id)
         """Background thread for leaders to send AppendEntries RPCs."""
         while self.running:
             with self.state_lock:
@@ -125,6 +127,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
             time.sleep(HEARTBEAT_INTERVAL / 1000)
     
     def _run_apply_command(self):
+        print("Entered apply command", self.node_id)
         """Background thread to apply committed entries to the state machine."""
         print(f"Current process: {os.getpid()} Run appl command")
         print(f"Current thread: {threading.current_thread().name} Run appl command")
@@ -141,16 +144,16 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
                     # Apply commands to state machine
                     for i in range(last_applied + 1, commit_index + 1):
                         entry = self.persistent_log.get_entries(i, i + 1)[0]
-                        if "command" in entry:
+                        if "command" in entry and entry["command"]["type"] != "config_change":
                             result = self.state_machine.apply_command(entry["command"], log_index=i)
                             self._resolve_command_future(i, result)
 
                     self.persistent_log.set_last_applied(commit_index)
-            
             # Sleep a small amount to avoid busy waiting
             time.sleep(0.01)
 
     def _resolve_command_future(self, index, result):
+        print("Entered resolve_command", self.node_id)
         """Resolve any futures waiting for this command index."""
         # Iterate through the command queue to find matching futures
         pending_items = []
@@ -177,10 +180,12 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
             self.command_queue.put_nowait(item)
 
     def _reset_election_timer(self):
+        # print("Entered reset election timer")
         """Reset the election timer."""
         self.last_heartbeat = time.time()
     
     def _start_election(self):
+        print("Entered start election", self.node_id)
         """Start an election for a new leader."""
         with self.state_lock:
             # Increment current term
@@ -223,6 +228,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
                     logging.error(f"Error sending RequestVote to {node_id}: {e}")
     
     def _request_vote_thread(self, node_id, stub, request):
+        print("Entered request vote thread", self.node_id)
         """Thread to send a RequestVote RPC to a node."""
         try:
             response = stub.RequestVote(request)            
@@ -276,11 +282,13 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
     
     def _send_append_entries(self):
         """Send AppendEntries RPCs to all followers."""
+        print("Entered send append entries", self.node_id)
         current_term = self.persistent_log.get_current_term()
         
         for node_id, stub in self.node_stubs.items():
             # Prepare entries to send
             next_idx = self.next_index.get(node_id, 0)
+            print("next index", next_idx, node_id)
             last_log_index = self.persistent_log.get_last_log_index()
             
             # If follower is up to date, just send heartbeat
@@ -289,8 +297,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
                 prev_log_index = last_log_index
                 prev_log_term = self.persistent_log.get_last_log_term()
             else:
-                # Send at most 100 entries at a time
-                entries = self.persistent_log.get_entries(next_idx, next_idx + 100)
+                entries = self.persistent_log.get_entries(next_idx, last_log_index + 1)
                 prev_log_index = next_idx - 1
                 prev_log_term = 0
                 
@@ -317,6 +324,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
             ).start()
     
     def _append_entries_per_node(self, node_id, stub, request):
+        print("Entered append entries per node", self.node_id)
         """Thread to send an AppendEntries RPC to a node."""
         try:
             response = stub.AppendEntries(request)
@@ -348,6 +356,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
             logging.error(f"Error in AppendEntries per node for {node_id}: {e}")
     
     def _check_commit_index(self):
+        print("Entered check commit index", self.node_id)
         """Check if we can advance the commit index."""
         current_term = self.persistent_log.get_current_term()
         commit_index = self.persistent_log.get_commit_index()
@@ -374,27 +383,28 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
                         self._run_apply_command()
                     logging.debug(f"Advanced commit index to {n} {self.state}")
 
-    def _process_config_change(self, command):
-        """Process a configuration change command on follower nodes."""
-        if command["action"] == "add":
-            node_id = command["node_id"]
-            host = command["host"]
-            port = command["port"]
-            raft_port = command["raft_port"]
+    # def _process_config_change(self, command):
+    #     """Process a configuration change command on follower nodes."""
+    #     if command["action"] == "add":
+    #         node_id = command["node_id"]
+    #         host = command["host"]
+    #         port = command["port"]
+    #         raft_port = command["raft_port"]
             
-            # Update configuration
-            self.config.add_node(node_id, host, port, raft_port)
+    #         # Update configuration
+    #         self.config.add_node(node_id, host, port, raft_port)
             
-            # Create a new stub for communicating with the node
-            if node_id != self.node_id and node_id not in self.node_stubs:
-                try:
-                    channel = grpc.insecure_channel(f"{host}:{raft_port}")
-                    self.node_stubs[node_id] = raft_pb2_grpc.RaftServiceStub(channel)
-                    logging.info(f"Node {self.node_id} added stub for new node {node_id}")
-                except Exception as e:
-                    logging.error(f"Error creating stub for node {node_id}: {e}")
+    #         # Create a new stub for communicating with the node
+    #         if node_id != self.node_id and node_id not in self.node_stubs:
+    #             try:
+    #                 channel = grpc.insecure_channel(f"{host}:{raft_port}")
+    #                 self.node_stubs[node_id] = raft_pb2_grpc.RaftServiceStub(channel)
+    #                 logging.info(f"Node {self.node_id} added stub for new node {node_id}")
+    #             except Exception as e:
+    #                 logging.error(f"Error creating stub for node {node_id}: {e}")
     
     def _recover_from_snapshot(self):
+        print("Entered recover from snapshot", self.node_id)
         """Recover state by applying logs since the last snapshot."""
         last_snapshot_index = self.state_machine.get_last_snapshot_index()
         commit_index = self.persistent_log.get_commit_index()
@@ -417,6 +427,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
         logging.info(f"Recovery complete - applied commands from index {last_snapshot_index+1} to {commit_index}")
 
     async def submit_command(self, command):
+        print("Entered submit command", self.node_id)
         """Submit a command to the Raft cluster."""
         print("Locking state")
         with self.state_lock:
@@ -497,11 +508,13 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
                 return raft_pb2.RequestVoteResponse(term=current_term, vote_granted=False)
     
     def AppendEntries(self, request, context):
+        print("Entered append entries", self.node_id)
         with self.state_lock:
             current_term = self.persistent_log.get_current_term()
             
             # If the leader's term is lower than our term, reject entries
             if request.term < current_term:
+                print("rejected entries")
                 return raft_pb2.AppendEntriesResponse(term=current_term, success=False)
             
             # Accept the leader (either same term or higher term)
@@ -521,10 +534,12 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
                 
                 # If our log is too short, we can't verify the previous entry
                 if prev_log_index > last_log_index:
+                    print("rejected entries", prev_log_index, last_log_index)
                     return raft_pb2.AppendEntriesResponse(term=current_term, success=False)
                 
                 prev_entries = self.persistent_log.get_entries(prev_log_index, prev_log_index + 1)
                 if not prev_entries or prev_entries[0]["term"] != request.prev_log_term:
+                    print("rejected entries second", prev_entries, request.prev_log_term)
                     return raft_pb2.AppendEntriesResponse(term=current_term, success=False)
             
             # Convert string entries back to dictionaries
@@ -533,11 +548,17 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
             # Append entries to log
             if entries:
                 success, _ = self.persistent_log.append_entries(entries, prev_log_index + 1)
+                print("All entries", self.node_id, self.persistent_log.get_entries(0, self.persistent_log.get_last_log_index() + 1))
+                print("config", self.config.get_nodes())
                 if not success:
                     return raft_pb2.AppendEntriesResponse(term=current_term, success=False)
             
             # Update commit index if leader's commit index is higher
             if request.leader_commit > self.persistent_log.get_commit_index():
+                for i in range(self.persistent_log.get_last_log_index(), request.leader_commit):
+                    entry = self.persistent_log.get_entries(i, i + 1)[0]
+                    if "command" in entry:
+                        result = self.state_machine.apply_command(entry["command"], log_index=i)
                 last_new_index = prev_log_index + len(entries)
                 new_commit_index = min(request.leader_commit, last_new_index)
                 self.persistent_log.set_commit_index(new_commit_index)
@@ -545,6 +566,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
             return raft_pb2.AppendEntriesResponse(term=current_term, success=True)
     
     def AddNode(self, request, context):
+        print("Entered add node", self.node_id)
         with self.state_lock:
             if self.state != LEADER:
                 _, node_info = self.config.get_current_node()
@@ -572,10 +594,32 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
             # Create a new stub for the node
             channel = grpc.insecure_channel(f"{host}:{raft_port}")
             self.node_stubs[node_id] = raft_pb2_grpc.RaftServiceStub(channel)
-            
+
+            try:
+                # Create a configuration update for the new node
+                config_update = raft_pb2.ClusterConfigUpdate(
+                    nodes=[
+                        raft_pb2.NodeInfo(
+                            node_id=nid,
+                            host=info["host"],
+                            port=info["port"],
+                            raft_port=info["raft_port"]
+                        ) for nid, info in self.config.get_nodes().items()
+                    ]
+                )
+                
+                # Send the update to the new node
+                response = self.node_stubs[node_id].UpdateClusterConfig(config_update)
+                if not response.success:
+                    logging.error(f"Failed to update config on new node {node_id}: {response.message}")
+            except Exception as e:
+                logging.error(f"Error sending cluster config to new node {node_id}: {e}")
+
             # Initialize leader state for the new node
             last_log_index = self.persistent_log.get_last_log_index()
-            self.next_index[node_id] = last_log_index + 1
+            # TODO? check the video
+            # self.next_index[self.node_id] = last_log_index + 1
+            self.next_index[node_id] = 0
             self.match_index[node_id] = 0
             
             # Submit a configuration change command
@@ -611,14 +655,46 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
                 success=True,
                 message=f"Node {node_id} added to the cluster"
             )
+
+    def UpdateClusterConfig(self, request, context):
+        """Update this node's cluster configuration with information from the leader."""
+        try:
+            # Add all nodes to our configuration
+            for node_info in request.nodes:
+                nid = node_info.node_id
+                # Skip adding ourselves
+                if nid != self.node_id:
+                    # Update configuration
+                    self.config.add_node(
+                        nid,
+                        node_info.host,
+                        node_info.port,
+                        node_info.raft_port
+                    )
+                    
+                    # Create stub for communication
+                    if nid not in self.node_stubs:
+                        channel = grpc.insecure_channel(f"{node_info.host}:{node_info.raft_port}")
+                        self.node_stubs[nid] = raft_pb2_grpc.RaftServiceStub(channel)
+            
+            # Save configuration
+            self.config.save_config()
+            
+            logging.info(f"Node {self.node_id} updated with complete cluster configuration")
+            return raft_pb2.UpdateClusterConfigResponse(success=True, message="Configuration updated")
+        except Exception as e:
+            return raft_pb2.UpdateClusterConfigResponse(
+                success=False,
+                message=f"Error updating configuration: {str(e)}"
+            )
     
     def stop(self):
         """Stop the Raft node."""
         self.running = False
         self.server.stop(0)
-        if self.election_thread.is_alive():
-            self.election_thread.join(timeout=1.0)
-        if self.append_entries_thread.is_alive():
-            self.append_entries_thread.join(timeout=1.0)
-        if self.apply_command_thread.is_alive():
-            self.apply_command_thread.join(timeout=1.0)
+        # if self.election_thread.is_alive():
+        #     self.election_thread.join(timeout=1.0)
+        # if self.append_entries_thread.is_alive():
+        #     self.append_entries_thread.join(timeout=1.0)
+        # if self.apply_command_thread.is_alive():
+        #     self.apply_command_thread.join(timeout=1.0)

@@ -45,3 +45,22 @@ message AddNodeResponse {
   bool success = 1;
   string message = 2;
 }
+
+message NodeInfo {
+  string node_id = 1;
+  string host = 2;
+  int32 port = 3;
+  int32 raft_port = 4;
+}
+
+message ClusterConfigUpdate {
+  repeated NodeInfo nodes = 1;
+}
+
+message UpdateClusterConfigResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Add to the RaftService
+rpc UpdateClusterConfig (ClusterConfigUpdate) returns (UpdateClusterConfigResponse);
