@@ -156,31 +156,31 @@ def demo_create_accounts():
     # Check if usernames exist
     try:
         alice_exists = client.account_exists("alice")
-        bob_exists = client.account_exists("bob")
-        charlie_exists = client.account_exists("charlie")
+        # bob_exists = client.account_exists("bob")
+        # charlie_exists = client.account_exists("charlie")
         
         print(f"User 'alice' exists: {alice_exists}")
-        print(f"User 'bob' exists: {bob_exists}")
-        print(f"User 'charlie' exists: {charlie_exists}")
+        # print(f"User 'bob' exists: {bob_exists}")
+        # print(f"User 'charlie' exists: {charlie_exists}")
         
         # Create accounts if they don't exist
         if not alice_exists:
             client.create_account("alice", "password")
             print("Created account for 'alice'")
         
-        if not bob_exists:
-            client.create_account("bob", "password")
-            print("Created account for 'bob'")
+        # if not bob_exists:
+        #     client.create_account("bob", "password")
+        #     print("Created account for 'bob'")
             
-        if not charlie_exists:
-            client.create_account("charlie", "password")
-            print("Created account for 'charlie'")
+        # if not charlie_exists:
+        #     client.create_account("charlie", "password")
+        #     print("Created account for 'charlie'")
         
         # List accounts to verify
-        print("\nListing accounts:")
-        accounts = client.list_accounts()
-        for account in accounts:
-            print(f"- {account}")
+        # print("\nListing accounts:")
+        # accounts = client.list_accounts()
+        # for account in accounts:
+        #     print(f"- {account}")
             
     except Exception as e:
         print(f"Error during account creation: {e}")
@@ -392,7 +392,7 @@ def run_demo():
 
         # # Run the demo steps
         demo_check_account_exists()
-        # demo_create_accounts()
+        demo_create_accounts()
         # time.sleep(1)
         
         # demo_send_messages()

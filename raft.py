@@ -150,7 +150,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
 
                     self.persistent_log.set_last_applied(commit_index)
             # Sleep a small amount to avoid busy waiting
-            time.sleep(0.01)
+            time.sleep(0.1)
 
     def _resolve_command_future(self, index, result):
         print("Entered resolve_command", self.node_id)
@@ -329,6 +329,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
         try:
             response = stub.AppendEntries(request)
             
+            # TODO: this conflicts with submit_command
             with self.state_lock:
                 # If we're no longer the leader or term has changed, ignore the response
                 if self.state != LEADER or response.term != self.persistent_log.get_current_term():
@@ -380,7 +381,22 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
                     entry = entries[0]
                     if "command" in entry:
                         print(f"Current thread: {threading.current_thread().name} Check commit index")
-                        self._run_apply_command()
+                        # self._run_apply_command()
+                        commit_index = self.persistent_log.get_commit_index()
+                        last_applied = self.persistent_log.get_last_applied()
+                        # print(f"Current thread: {threading.current_thread().name} Run appl command", commit_index, last_applied)
+                        if commit_index > last_applied:
+                            print("pre pre main debug", commit_index, last_applied)
+                            # Apply commands to state machine
+                            for i in range(last_applied + 1, commit_index + 1):
+                                entry = self.persistent_log.get_entries(i, i + 1)[0]
+                                if "command" in entry and entry["command"]["type"] != "config_change":
+                                    print("pre main debug")
+                                    result = self.state_machine.apply_command(entry["command"], log_index=i)
+                                    print("main debug")
+                                    self._resolve_command_future(i, result)
+
+                    self.persistent_log.set_last_applied(commit_index)                        
                     logging.debug(f"Advanced commit index to {n} {self.state}")
 
     # def _process_config_change(self, command):
@@ -463,14 +479,14 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
             print("Future set?", future.done())
             # Send append entries to all followers
             self._send_append_entries()
-            # Wait for the result with a timeout
-            try:
-                print("Waiting for future", future.done())
-                result = await asyncio.wait_for(future, timeout=30.0)
-                print("Waited for future", future.done())
-                return True, result
-            except asyncio.TimeoutError:
-                return False, "Timeout waiting for command to be committed"
+        # Wait for the result with a timeout
+        try:
+            print("Waiting for future", future.done())
+            result = await asyncio.wait_for(future, timeout=60.0)
+            print("Waited for future", future.done())
+            return True, result
+        except asyncio.TimeoutError:
+            return False, "Timeout waiting for command to be committed"
     
     # gRPC service methods
     def RequestVote(self, request, context):
