@@ -84,7 +84,12 @@ def kill_server(node_id):
 def restart_server(node_id, host, port, raft_port, leader_host=None, leader_port=None):
     """Restart a server node."""
     kill_server(node_id)
-    return start_server(node_id, host, port, raft_port, leader_host, leader_port)
+    success = False
+    while not success:
+        server, success = start_server(node_id, host, port, raft_port, leader_host, leader_port)
+            return server
+        else:
+            restart_server(node_id, host, port, raft_port, leader_host, leader_port)
 
 def cleanup():
     """Clean up all servers and clients."""
@@ -275,14 +280,17 @@ def demo_persistence():
     demo_step += 1
     print(f"\n=== STEP {demo_step}: PERSISTENCE TEST ===")
     
+    # Make a list of all servers to connect to
+    servers_list = [["localhost", 50061], ["localhost", 50062], ["localhost", 50063]]
+
     try:
         # Restart the nodes that were killed
         print("\nRestarting node2...")
-        restart_server("2", "localhost", 50052, 50062, "localhost", 50061)
+        restart_server("2", "localhost", 50052, 50062, servers_list)
         time.sleep(2)
         
         print("Restarting node3...")
-        restart_server("3", "localhost", 50053, 50063, "localhost", 50061)
+        restart_server("3", "localhost", 50053, 50063, servers_list)
         time.sleep(2)
         
         # Check if messages are still accessible after restart
@@ -348,7 +356,7 @@ def demo_new_server_addition():
     try:
         print("\nStarting a new server (node4) and joining it to the cluster...")
         # For the new node, connect to an existing node (e.g., node2)
-        new_node = start_server("4", "localhost", 50054, 50064, "localhost", 50062)
+        new_node, _ = start_server("4", "localhost", 50054, 50064, "localhost", 50062)
         time.sleep(5)  # Give time for the new node to join
         
         # Send a new message after adding the server

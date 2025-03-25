@@ -599,12 +599,13 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
             port = request.port
             raft_port = request.raft_port
             
+            # TODO: check: removed this so that the old readded while in the meantime other nodes added need to have all the node info
             # Check if node already exists
-            if node_id in self.config.get_nodes():
-                return raft_pb2.AddNodeResponse(
-                    success=False,
-                    message=f"Node {node_id} already exists"
-                )
+            # if node_id in self.config.get_nodes():
+            #     return raft_pb2.AddNodeResponse(
+            #         success=False,
+            #         message=f"Node {node_id} already exists"
+            #     )
             
             # Add node to config
             self.config.add_node(node_id, host, port, raft_port)
@@ -657,14 +658,14 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
             }
             
             # Append to local log
-            last_index = self.persistent_log.get_last_log_index()
-            success, _ = self.persistent_log.append_entries([entry], last_index + 1)
+            # last_index = self.persistent_log.get_last_log_index()
+            # success, _ = self.persistent_log.append_entries([entry], last_index + 1)
             
-            if not success:
-                return raft_pb2.AddNodeResponse(
-                    success=False,
-                    message="Failed to append configuration change to log"
-                )
+            # if not success:
+            #     return raft_pb2.AddNodeResponse(
+            #         success=False,
+            #         message="Failed to append configuration change to log"
+            #     )
             
             # Send append entries to all followers including the new node
             self._send_append_entries()
