@@ -381,11 +381,13 @@ def demo_new_server_addition():
     except Exception as e:
         print(f"Error during new server addition test: {e}")
 
-def run_demo():
+def run_demo(args):
     """Run the complete demo."""
     try:
         # Clear data directory for a clean start
-        clear_data_directory()
+        if not args.skip_clear:
+            clear_data_directory()
+
         
         # Start a cluster with 3 nodes
         start_server("1", "localhost", 50051, 50061)
@@ -443,11 +445,8 @@ if __name__ == "__main__":
     parser.add_argument("--skip-clear", action="store_true", help="Skip clearing data directory")
     args = parser.parse_args()
     
-    if not args.skip_clear:
-        clear_data_directory()
-    
     try:
-        run_demo()
+        run_demo(args)
     except KeyboardInterrupt:
         print("\nDemo interrupted by user")
     finally:
