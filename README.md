@@ -19,3 +19,32 @@ Finally, our engineering notebook can be found at [here](https://github.com/Natn
 
 Our grading notes for other teams at our table will be checked into this repository after demo day has concluded.
 
+
+
+### Running cross-machine failure demo during demo day
+
+1.  **Machine 1:**
+    *   Open a terminal.
+    *   Navigate to the directory containing the scripts.
+    *   Run: `python distributed_demo.py --machine-id 1`
+    *   It will ask for the IP address of Machine 2. Enter it.
+
+2.  **Machine 2:**
+    *   Open a terminal.
+    *   Navigate to the directory containing the scripts.
+    *   Run: `python distributed_demo.py --machine-id 2`
+    *   It will ask for the IP address of Machine 1. Enter it.
+
+3.  **Follow Instructions:**
+    *   Both terminals will show the status of the servers they are running.
+    *   The demo will run the initial workload.
+    *   It will then pause and ask you to trigger the first failure (`fail 2` on Machine 1, `fail 3` (or 4 or 5) on Machine 2).
+    *   After typing the `fail` commands in the respective terminals, press Enter in *both* terminals where the script prompted you.
+    *   The demo will run the workload again (should succeed).
+    *   It will pause again, asking Machine 2 to fail another node.
+    *   Type the `fail` command on Machine 2, then press Enter in *both* terminals again.
+    *   The demo will run the workload again (should succeed, as 3 nodes remain).
+    *   It will pause again, asking Machine 2 to fail its last node.
+    *   Type the `fail` command on Machine 2, then press Enter in *both* terminals again.
+    *   The demo will run the workload one last time (should fail due to lack of quorum).
+    *   Finally, type `exit` or press `Ctrl+C` in both terminals to clean up and exit.
