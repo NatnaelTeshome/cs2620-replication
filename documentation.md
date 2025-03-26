@@ -572,8 +572,8 @@ The system ensures that all data is persisted to disk, allowing the system to re
   def _save_snapshot(self, log_index):
       """Save current state as snapshot."""
       try:
-          with open(self.snapshot_file, 'wb') as f:
-              pickle.dump(self.db, f)
+          with open(self.snapshot_file, 'w') as f:
+              json.dump(self.db, f)
 
           with open(self.snapshot_index_file, 'w') as f:
               f.write(str(log_index))

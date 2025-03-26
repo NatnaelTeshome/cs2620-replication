@@ -1,9 +1,8 @@
 import os
 import json
-import shelve
-import pickle
 import logging
 from datetime import datetime
+import json
 
 
 class PersistentLog:
@@ -105,15 +104,15 @@ class PersistentLog:
     def load_log(self):
         """Load log from disk."""
         if os.path.exists(self.log_file):
-            with open(self.log_file, "rb") as f:
-                self.log = pickle.load(f)
+            with open(self.log_file, "r") as f:
+                self.log = json.load(f)
         else:
             self.log = []
     
     def _save_log(self):
         """Save log to disk."""
-        with open(self.log_file, "wb") as f:
-            pickle.dump(self.log, f)
+        with open(self.log_file, "w") as f:
+            json.dump(self.log, f)
 
 
 class StateMachine:
@@ -146,8 +145,8 @@ class StateMachine:
     def _load_snapshot(self):
         """Load state from snapshot."""
         try:
-            with open(self.snapshot_file, 'rb') as f:
-                self.db = pickle.load(f)
+            with open(self.snapshot_file, 'r') as f:
+                self.db = json.load(f)
             
             with open(self.snapshot_index_file, 'r') as f:
                 self.last_snapshot_index = int(f.read().strip())
@@ -167,8 +166,8 @@ class StateMachine:
     def _save_snapshot(self, log_index):
         """Save current state as snapshot."""
         try:
-            with open(self.snapshot_file, 'wb') as f:
-                pickle.dump(self.db, f)
+            with open(self.snapshot_file, 'w') as f:
+                json.dump(self.db, f)
             
             with open(self.snapshot_index_file, 'w') as f:
                 f.write(str(log_index))

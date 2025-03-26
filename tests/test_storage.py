@@ -80,7 +80,7 @@ class TestPersistentLog:
             {"term": 1, "command": "cmd1"},
             {"term": 5, "command": "cmd2"},
         ]
-        with open(log_dir / "log", "wb") as f:
+        with open(log_dir / "log", "w") as f:
             pickle.dump(existing_log_entries, f)
 
         log = PersistentLog(node_id, data_dir=str(temp_data_dir))
@@ -222,8 +222,8 @@ class TestStateMachine:
         assert sm.commands_since_snapshot == 0
 
         # Verify snapshot file content
-        with open(sm.snapshot_file, "rb") as f:
-            snap_db = pickle.load(f)
+        with open(sm.snapshot_file, "r") as f:
+            snap_db = json.load(f)
         assert snap_db == sm.db
         with open(sm.snapshot_index_file, "r") as f:
             snap_idx = int(f.read().strip())
@@ -241,7 +241,7 @@ class TestStateMachine:
             "global_message_id": 5,
         }
         existing_index = 10
-        with open(sm_dir / "snapshot", "wb") as f:
+        with open(sm_dir / "snapshot", "w") as f:
             pickle.dump(existing_db, f)
         with open(sm_dir / "snapshot_index", "w") as f:
             f.write(str(existing_index))
@@ -621,8 +621,8 @@ class TestStateMachine:
         assert state_machine.last_snapshot_index == 3 # Snapshot taken at log_index 3
 
         # Verify snapshot content
-        with open(state_machine.snapshot_file, "rb") as f:
-            snap_db = pickle.load(f)
+        with open(state_machine.snapshot_file, "r") as f:
+            snap_db = json.load(f)
         assert "u1" in snap_db["accounts"]
         assert "u2" in snap_db["accounts"]
         assert "u3" in snap_db["accounts"]
