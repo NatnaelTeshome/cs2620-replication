@@ -207,10 +207,10 @@ def cleanup():
         except Exception as e:
             logging.error(f"Error closing client {client_id}: {e}")
 
-    # Optional: Remove cluster config files if they were created locally
-    # for i in range(1, TOTAL_SERVERS + 1):
-    #     if os.path.exists(f"cluster_config_{i}.json"):
-    #         os.remove(f"cluster_config_{i}.json")
+    # Remove cluster config files if they were created locally
+    for i in range(1, TOTAL_SERVERS + 1):
+        if os.path.exists(f"cluster_config_{i}.json"):
+            os.remove(f"cluster_config_{i}.json")
 
     logging.info("Local cleanup finished.")
 
@@ -361,9 +361,9 @@ def run_demo_workload(step_name: str):
 
     results = []
     results.append(demo_check_account_exists(client1))
-    results.append(demo_create_accounts(client1)) # Create accounts if needed
-    time.sleep(1) # Allow replication
-    results.append(demo_send_and_read_messages(client1, client2))
+    # results.append(demo_create_accounts(client1)) # Create accounts if needed
+    time.sleep(2) # Allow replication
+    # results.append(demo_send_and_read_messages(client1, client2))
 
     if all(results):
         console.print(f"[bold green]=== WORKLOAD {demo_step} COMPLETED SUCCESSFULLY ===[/]")

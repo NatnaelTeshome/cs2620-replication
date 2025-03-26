@@ -36,12 +36,8 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
         
         # Event loop for async operations
         # Get the current event loop or create a new one if needed
-        try:
-            self.loop = asyncio.get_running_loop()
-        except RuntimeError:
-            self.loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self.loop)
-        
+        self.loop = asyncio.new_event_loop()
+
         logging.info(f"Chat service initialized for node {node_id}")
     
     def Login(self, request, context):
