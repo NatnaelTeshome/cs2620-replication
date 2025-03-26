@@ -189,7 +189,12 @@ class StateMachine:
         elif cmd_type == "login":
             result = self._login(command["username"], command["password_hash"])
         elif cmd_type == "list_accounts":
-            result = self._list_accounts(command["username"])
+            result = self._list_accounts(
+                command["username"],
+                command.get("pattern", "*"),
+                command.get("page_size", 10),
+                command.get("page_num", 1),
+            )
         elif cmd_type == "create_account":
             result = self._create_account(command["username"], command["password_hash"])
         elif cmd_type == "send_message":
@@ -356,12 +361,18 @@ class StateMachine:
                 m["read"] = True
             
             # Also mark in conversations
+            message_ids_to_mark = {m["id"] for m in messages} # Get IDs efficiently
             for m in messages:
                 sender = m["from_"]
                 if sender in user_data.get("conversations", {}):
                     for conv_msg in user_data["conversations"][sender]:
                         if conv_msg["id"] == m["id"]:
                             conv_msg["read"] = True
+
+            # Also mark in the main messages list
+            for main_msg in user_data.get("messages", []):
+                if main_msg["id"] in message_ids_to_mark:
+                    main_msg["read"] = True
             
             remaining_unread = max(0, total_unread - end)
             
