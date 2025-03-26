@@ -4,14 +4,131 @@
 
 The system we implement for this demo assignment is a 2-fault tolerant distributed chat application. It uses the Raft consensus algorithm to manage the state across multiple nodes, ensuring that all nodes agree on the state even in the presence of failures. 
 
-We warrant the use of Raft for two key reasons. First, we are anticipating using Raft for our final project in this class and deemed this current design exercise as a valuable stepping stone, teaching us the intricacies of consensus algorithms. Second, while we've explicitly verified with the TFs during OH that using Raft for this assignment is okay (albeit perhaps overkill) - we fully agree with this assessment. Despite countless hours of debugging, synchronization issues, and sleepless nights, we're glad we took on this challenge and hope it might count as 'extra credit' for this demo exercise. 
+We warrant the use of Raft for two key reasons. First, we are anticipating using Raft for our final project in this class and deemed this current design exercise as a valuable stepping stone. Second, we've explicitly verified with the TFs during OH that using Raft for this assignment is okay, albeit perhaps an overkill - we fully agree with this assessment. Despite countless hours of debugging, synchronization issues, and sleepless nights, we're glad we took on this challenge and hope it might count as 'extra credit' for the demo exercise. 
 
 Note that *we roll our own basic implementation of Raft from scratch*, with no use of external libraries.
 The main implementation of the Raft engine can be found in the root of our project's repository,
 within the `raft.py` file. The log/persistence handler code can be found in `storage.py`.
 The demo harness code can be found in the `demo.py` directory. We elaborate on what each of these
 files does in the following section of our documentation. For a detailed documentation of
-our Raft implementation, please refer to the [Raft Implementation](# Detailed Explanation of Raft Implementation) at the end of this documentation file, as well as `raft.py`'s in-code comments.
+our Raft implementation, please refer to the [Raft Implementation](# Detailed Explanation of Raft Implementation) below, as well as `raft.py`'s in-code comments.
+
+---
+
+# Detailed Explanation of Raft Implementation
+
+Our Raft implementation follows the core principles of the Raft consensus algorithm as described in [the original paper by Diego Ongaro and John Ousterhout](https://raft.github.io/raft.pdf). We were also
+inspired by parts of [this GoLang implementation tutorial](https://notes.eatonphil.com/2023-05-25-raft.html). The key components of our implementation, in detail, are indicated by each following header title:
+
+## 1. State Management and Node Roles
+
+### Server States
+Each node can be in one of three states:
+- **Follower**: Passive role that responds to leader's requests (default state)
+- **Candidate**: Actively seeks votes to become a leader 
+- **Leader**: Handles all client requests and coordinates replication
+
+```python
+# Raft node states
+FOLLOWER = "FOLLOWER"
+CANDIDATE = "CANDIDATE"
+LEADER = "LEADER"
+```
+
+Each state has specific behaviors and transition rules. The state is maintained in the `state` variable with thread-safe access via `state_lock` (an instance of Python's [reentrant lock](https://docs.python.org/3/library/threading.html#rlock-objects)).
+
+### Persistent State
+Each node maintains persistent state that survives crashes:
+- **Current Term**: Monotonically increasing counter
+- **Voted For**: Candidate ID that received vote in current term (if any)
+- **Log Entries**: Complete log of commands with term numbers
+
+```python
+# In persistent_log initialization
+self.metadata = {
+    "current_term": 0,
+    "voted_for": None,
+    "commit_index": 0,
+    "last_applied": 0
+}
+```
+
+### Volatile State
+Each node also maintains volatile state that's rebuilt after crashes:
+- **Commit Index**: Highest log entry known to be committed
+- **Last Applied**: Highest log entry applied to state machine
+- **Next Index[]**: For leaders, index of next log entry to send to each follower
+- **Match Index[]**: For leaders, highest log entry known to be replicated on each follower
+
+## 2. Leader Election
+
+The leader election process is critical for establishing a single coordinator for the cluster.
+
+### Election Timer
+Each follower maintains an election timer that's reset whenever it receives a valid AppendEntries RPC (heartbeat) from the current leader. 
+The timeout is randomized between 150-300ms to prevent split votes, which is crucial for election stability.
+
+### Starting an Election
+When the timer expires, a follower becomes a candidate and starts an election:
+
+### Vote Counting
+Votes are collected asynchronously, and once a majority is reached, the candidate becomes the leader:
+
+### Vote Decision
+A server grants a vote if:
+1. The candidate's term is >= the server's current term
+2. The server hasn't already voted in this term
+3. The candidate's log is at least as up-to-date as the server's log
+
+## 3. Log Replication
+
+After a leader is elected, it handles all client requests and replicates them to followers.
+
+### Handling Client Requests
+When a client submits a command, the leader:
+1. Appends the command to its log
+2. Replicates the entry to followers
+3. Waits for a majority to confirm replication
+4. Applies the command to its state machine
+5. Returns the result to the client
+
+### AppendEntries RPC
+The leader sends AppendEntries RPCs to followers to replicate log entries and send heartbeats.
+
+### Processing AppendEntries
+Followers process AppendEntries by:
+1. Checking if the leader's term is current
+2. Verifying log consistency
+3. Appending new entries to their logs
+4. Updating their commit indices
+
+## 4. Commit Mechanism
+
+The commit mechanism ensures that entries are only applied when safely replicated to a majority of servers.
+
+### Advancing Commit Index
+After receiving AppendEntries responses, the leader updates its commit index based on the match indices of followers.
+
+### Applying Committed Entries
+Both leaders and followers apply committed entries to their state machines.
+## 5. Persistence and Recovery
+
+Persistence is implemented through the `PersistentLog` class.
+The persistence strategy ensures:
+1. **Durability**: Critical state is written to disk before responding to requests
+2. **Recovery**: After a crash, the node can reconstruct its state
+3. **Consistency**: The log is maintained consistently with Raft guarantees
+
+## 6. Dynamic Membership (Our Extra Credit)
+
+The implementation supports adding new nodes to the cluster through the AddNode RPC.
+
+The key challenges addressed in this implementation:
+1. **Log Consistency**: Ensuring logs stay consistent during membership changes
+2. **Configuration Distribution**: Distributing new configuration to all nodes
+3. **Safety**: Maintaining safety properties during transitions
+
+
 
 ### 2. Key Components
 
@@ -575,121 +692,4 @@ The system supports dynamic configuration changes, such as adding or removing no
           )
   ```
 Configuration changes are propagated to all nodes in the cluster, ensuring consistency.
-
----
-
-
-# Detailed Explanation of Raft Implementation
-
-Our Raft implementation follows the core principles of the Raft consensus algorithm as described in [the original paper by Diego Ongaro and John Ousterhout](https://raft.github.io/raft.pdf). We were also
-inspired by parts of [this GoLang implementation tutorial](https://notes.eatonphil.com/2023-05-25-raft.html). The key components of our implementation, in detail, are indicated by each following header title:
-
-## 1. State Management and Node Roles
-
-### Server States
-Each node can be in one of three states:
-- **Follower**: Passive role that responds to leader's requests (default state)
-- **Candidate**: Actively seeks votes to become a leader 
-- **Leader**: Handles all client requests and coordinates replication
-
-```python
-# Raft node states
-FOLLOWER = "FOLLOWER"
-CANDIDATE = "CANDIDATE"
-LEADER = "LEADER"
-```
-
-Each state has specific behaviors and transition rules. The state is maintained in the `state` variable with thread-safe access via `state_lock` (an instance of Python's [reentrant lock](https://docs.python.org/3/library/threading.html#rlock-objects)).
-
-### Persistent State
-Each node maintains persistent state that survives crashes:
-- **Current Term**: Monotonically increasing counter
-- **Voted For**: Candidate ID that received vote in current term (if any)
-- **Log Entries**: Complete log of commands with term numbers
-
-```python
-# In persistent_log initialization
-self.metadata = {
-    "current_term": 0,
-    "voted_for": None,
-    "commit_index": 0,
-    "last_applied": 0
-}
-```
-
-### Volatile State
-Each node also maintains volatile state that's rebuilt after crashes:
-- **Commit Index**: Highest log entry known to be committed
-- **Last Applied**: Highest log entry applied to state machine
-- **Next Index[]**: For leaders, index of next log entry to send to each follower
-- **Match Index[]**: For leaders, highest log entry known to be replicated on each follower
-
-## 2. Leader Election
-
-The leader election process is critical for establishing a single coordinator for the cluster.
-
-### Election Timer
-Each follower maintains an election timer that's reset whenever it receives a valid AppendEntries RPC (heartbeat) from the current leader. 
-The timeout is randomized between 150-300ms to prevent split votes, which is crucial for election stability.
-
-### Starting an Election
-When the timer expires, a follower becomes a candidate and starts an election:
-
-### Vote Counting
-Votes are collected asynchronously, and once a majority is reached, the candidate becomes the leader:
-
-### Vote Decision
-A server grants a vote if:
-1. The candidate's term is >= the server's current term
-2. The server hasn't already voted in this term
-3. The candidate's log is at least as up-to-date as the server's log
-
-## 3. Log Replication
-
-After a leader is elected, it handles all client requests and replicates them to followers.
-
-### Handling Client Requests
-When a client submits a command, the leader:
-1. Appends the command to its log
-2. Replicates the entry to followers
-3. Waits for a majority to confirm replication
-4. Applies the command to its state machine
-5. Returns the result to the client
-
-### AppendEntries RPC
-The leader sends AppendEntries RPCs to followers to replicate log entries and send heartbeats.
-
-### Processing AppendEntries
-Followers process AppendEntries by:
-1. Checking if the leader's term is current
-2. Verifying log consistency
-3. Appending new entries to their logs
-4. Updating their commit indices
-
-## 4. Commit Mechanism
-
-The commit mechanism ensures that entries are only applied when safely replicated to a majority of servers.
-
-### Advancing Commit Index
-After receiving AppendEntries responses, the leader updates its commit index based on the match indices of followers.
-
-### Applying Committed Entries
-Both leaders and followers apply committed entries to their state machines.
-## 5. Persistence and Recovery
-
-Persistence is implemented through the `PersistentLog` class.
-The persistence strategy ensures:
-1. **Durability**: Critical state is written to disk before responding to requests
-2. **Recovery**: After a crash, the node can reconstruct its state
-3. **Consistency**: The log is maintained consistently with Raft guarantees
-
-## 6. Dynamic Membership (Our Extra Credit)
-
-The implementation supports adding new nodes to the cluster through the AddNode RPC.
-
-The key challenges addressed in this implementation:
-1. **Log Consistency**: Ensuring logs stay consistent during membership changes
-2. **Configuration Distribution**: Distributing new configuration to all nodes
-3. **Safety**: Maintaining safety properties during transitions
-
 
