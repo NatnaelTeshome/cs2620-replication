@@ -566,7 +566,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
             # Append entries to log
             if entries:
                 success, _ = self.persistent_log.append_entries(entries, prev_log_index + 1)
-                # print("All entries", self.node_id, self.persistent_log.get_entries(0, self.persistent_log.get_last_log_index() + 1))
+                print("All entries", self.node_id, self.persistent_log.get_entries(0, self.persistent_log.get_last_log_index() + 1))
                 # print("config", self.config.get_nodes())
                 if not success:
                     return raft_pb2.AppendEntriesResponse(term=current_term, success=False)
@@ -658,8 +658,8 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
             }
             
             # Append to local log
-            # last_index = self.persistent_log.get_last_log_index()
-            # success, _ = self.persistent_log.append_entries([entry], last_index + 1)
+            last_index = self.persistent_log.get_last_log_index()
+            success, _ = self.persistent_log.append_entries([entry], last_index + 1)
             
             # if not success:
             #     return raft_pb2.AddNodeResponse(

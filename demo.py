@@ -8,6 +8,7 @@ import threading
 import logging
 import shutil
 from datetime import datetime
+import json
 
 # Import chat client
 from client_grpc import CustomProtocolClient
@@ -32,7 +33,7 @@ def clear_data_directory():
         logging.info("Cleared data directory")
     os.makedirs("./data", exist_ok=True)
 
-def start_server(node_id, host, port, raft_port, leader_host=None, leader_port=None):
+def start_server(node_id, host, port, raft_port, leader_info=None):
     """Start a chat server node."""
     cmd = [
         "python", "chat_server.py",
@@ -42,8 +43,10 @@ def start_server(node_id, host, port, raft_port, leader_host=None, leader_port=N
         "--raft-port", str(raft_port)
     ]
     
-    if leader_host and leader_port:
-        cmd.extend(["--leader-host", leader_host, "--leader-port", str(leader_port)])
+    if leader_info:
+        leader_info = json.dumps(leader_info)
+        cmd.extend(["--leader-info", leader_info])
+        # cmd.extend(["--leader-host", leader_host, "--leader-port", str(leader_port)])
     
     logging.info(f"Starting server node {node_id} on {host}:{port} (Raft port: {raft_port})")
     
@@ -56,6 +59,7 @@ def start_server(node_id, host, port, raft_port, leader_host=None, leader_port=N
     )
     
     # Store the process
+
     servers[node_id] = {
         "process": process,
         "host": host,
@@ -80,16 +84,11 @@ def kill_server(node_id):
         del servers[node_id]
     else:
         logging.warning(f"Server node {node_id} not found")
-
-def restart_server(node_id, host, port, raft_port, leader_host=None, leader_port=None):
+        
+def restart_server(node_id, host, port, raft_port, leader_info=None):
     """Restart a server node."""
     kill_server(node_id)
-    success = False
-    while not success:
-        server, success = start_server(node_id, host, port, raft_port, leader_host, leader_port)
-            return server
-        else:
-            restart_server(node_id, host, port, raft_port, leader_host, leader_port)
+    return start_server(node_id, host, port, raft_port, leader_info)
 
 def cleanup():
     """Clean up all servers and clients."""
@@ -352,11 +351,12 @@ def demo_new_server_addition():
     demo_step += 1
     print(f"\n=== STEP {demo_step}: NEW SERVER ADDITION (EXTRA CREDIT) ===")
     
+    servers_list = [["localhost", 50061], ["localhost", 50062], ["localhost", 50063]]
     # Start a new server node and join it to the cluster
     try:
         print("\nStarting a new server (node4) and joining it to the cluster...")
         # For the new node, connect to an existing node (e.g., node2)
-        new_node, _ = start_server("4", "localhost", 50054, 50064, "localhost", 50062)
+        new_node, _ = start_server("4", "localhost", 50054, 50064, servers_list)
         time.sleep(5)  # Give time for the new node to join
         
         # Send a new message after adding the server
@@ -388,23 +388,22 @@ def run_demo(args):
         if not args.skip_clear:
             clear_data_directory()
 
-        
         # Start a cluster with 3 nodes
         start_server("1", "localhost", 50051, 50061)
         time.sleep(1)
         print("Started server node 1 (leader)")
-        start_server("2", "localhost", 50052, 50062, "localhost", 50061)
+        start_server("2", "localhost", 50052, 50062, [["localhost", 50061]])
         time.sleep(1)
         print("Started server node 2 (follower)")
-        start_server("3", "localhost", 50053, 50063, "localhost", 50061)
+        start_server("3", "localhost", 50053, 50063, [["localhost", 50061]])
         time.sleep(3)  # Give time for cluster to form
         print("Started server node 3 (follower)")
         # add another server
-        start_server("4", "localhost", 50054, 50064, "localhost", 50061)
+        start_server("4", "localhost", 50054, 50064, [["localhost", 50061]])
         time.sleep(3)  # Give time for cluster to form
         print("Started server node 4 (follower)")
         # add another server
-        start_server("5", "localhost", 50055, 50065, "localhost", 50061)
+        start_server("5", "localhost", 50055, 50065, [["localhost", 50061]])
         time.sleep(3)  # Give time for cluster to form
         print("Started server node 5 (follower)")
         
@@ -412,13 +411,13 @@ def run_demo(args):
         create_client("client1", "localhost", 50051)
         create_client("client2", "localhost", 50051)
 
-        # # Run the demo steps
+        # Run the demo steps
         demo_check_account_exists()
-        demo_create_accounts()
-        time.sleep(1)
+        # demo_create_accounts()
+        # time.sleep(1)
         
-        demo_send_messages()
-        time.sleep(1)
+        # demo_send_messages()
+        # time.sleep(1)
         
         # demo_fault_tolerance()
         # time.sleep(3)

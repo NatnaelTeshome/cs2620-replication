@@ -15,6 +15,7 @@ import chat_pb2
 import chat_pb2_grpc
 import raft_pb2
 import raft_pb2_grpc
+import json
 
 # Configure logging
 logging.basicConfig(
@@ -490,14 +491,20 @@ class ChatServer:
         logging.info("Server stopped")
 
 
-def start_server(node_id, config_file=None, host=None, port=None, raft_port=None, leader_host=None, leader_port=None):
+def start_server(node_id, config_file=None, host=None, port=None, raft_port=None, leader_info=None):
     """Start a chat server."""
     server = None 
     result = True
     # If leader information is provided, join the cluster
-    if leader_host and leader_port:
+    if leader_info:
+        leader_info = json.loads(leader_info)
         server = ChatServer(node_id, config_file, host, port, raft_port)
-        result = server.join_cluster(leader_host, leader_port)
+        result = False
+        i = 0
+        while not result and i < len(leader_info):
+            leader_host, leader_port = leader_info[i]
+            i += 1
+            result = server.join_cluster(leader_host, leader_port)
     else:
         server = ChatServer(node_id, config_file, host, port, raft_port, True)
     return server, result
@@ -512,9 +519,8 @@ if __name__ == "__main__":
     parser.add_argument("--host", help="Host address")
     parser.add_argument("--port", type=int, help="Port for chat service")
     parser.add_argument("--raft-port", type=int, help="Port for Raft consensus")
-    parser.add_argument("--leader-host", help="Leader host (if joining an existing cluster)")
-    parser.add_argument("--leader-port", type=int, help="Leader Raft port (if joining an existing cluster)")
-    
+    parser.add_argument("--leader-info", help="Leader info (if joining an existing cluster)")
+
     args = parser.parse_args()
     
     server = start_server(
@@ -523,8 +529,7 @@ if __name__ == "__main__":
         args.host,
         args.port,
         args.raft_port,
-        args.leader_host,
-        args.leader_port
+        args.leader_info
     )
     
     try:
