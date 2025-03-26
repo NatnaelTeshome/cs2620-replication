@@ -359,10 +359,6 @@ def run_demo_workload(step_name: str):
     # --- Execute workload steps ---
     results = []
     results.append(step_check_accounts(client1))
-    time.sleep(0.5)
-    results.append(step_create_accounts(client1))
-    time.sleep(0.5)
-    results.append(step_send_message(client1))
     time.sleep(1) # Allow replication
 
     if all(results):
