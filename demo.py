@@ -243,17 +243,9 @@ def demo_fault_tolerance():
         print("\nKilling follower node (node2)...")
         kill_server("2")
         time.sleep(2)
-        
-        # TODO: redundant
-        clients["client1"].login("alice", "password")
-        print("Logged in as 'alice' on client1")
 
-        # Try sending a message with one node down
-        print("\nSending message with one node down...")
-        msg_id = clients["client1"].send_message("bob", "This message is sent with one node down!")
-        print(f"Message sent successfully (ID: {msg_id})")
-        time.sleep(1)
-        
+        bob_exists = clients["client1"].account_exists("bob")
+
         # Kill another follower node
         print("\nKilling another follower node (node3)...")
         kill_server("3")

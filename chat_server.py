@@ -35,8 +35,12 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
         self.subscribers_lock = threading.RLock()
         
         # Event loop for async operations
-        # Get the current event loop or create a new one if needed
         self.loop = asyncio.new_event_loop()
+        # We run our asyncio event loop in a dedicated daemon thread
+        # and then, from our gRPC methods, we schedule coroutines using thead-safe APIs
+        # (before we were using asyncio's run_until_complete(), which isn't thread-safe)
+        self.loop_thread = threading.Thread(target=self.loop.run_forever, daemon=True)
+        self.loop_thread.start()
 
         logging.info(f"Chat service initialized for node {node_id}")
     
@@ -52,7 +56,8 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
         }
         
         # Submit the command to Raft and wait for the result
-        success, result = self.loop.run_until_complete(self.raft_node.submit_command(command))
+        future = asyncio.run_coroutine_threadsafe(self.raft_node.submit_command(command), self.loop)
+        success, result = future.result()
         
         if not success:
             # If the command was not successful, check if it was because we're not the leader
@@ -98,7 +103,8 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
         }
         
         # Submit the command to Raft and wait for the result
-        success, result = self.loop.run_until_complete(self.raft_node.submit_command(command))
+        future = asyncio.run_coroutine_threadsafe(self.raft_node.submit_command(command), self.loop)
+        success, result = future.result()
         
         if not success:
             return chat_pb2.CreateAccountResponse(
@@ -124,7 +130,8 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
         }
         
         # Submit the command to Raft and wait for the result
-        success, result = self.loop.run_until_complete(self.raft_node.submit_command(command))
+        future = asyncio.run_coroutine_threadsafe(self.raft_node.submit_command(command), self.loop)
+        success, result = future.result()
         print("Result of chat_server", success, result)
         if not success:
             return chat_pb2.CheckUsernameResponse(
@@ -156,7 +163,8 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
         }
         
         # Submit the command to Raft and wait for the result
-        success, result = self.loop.run_until_complete(self.raft_node.submit_command(command))
+        future = asyncio.run_coroutine_threadsafe(self.raft_node.submit_command(command), self.loop)
+        success, result = future.result()
         
         if not success:
             return chat_pb2.ListAccountsResponse(
@@ -204,7 +212,8 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
         }
         
         # Submit the command to Raft and wait for the result
-        success, result = self.loop.run_until_complete(self.raft_node.submit_command(command))
+        future = asyncio.run_coroutine_threadsafe(self.raft_node.submit_command(command), self.loop)
+        success, result = future.result()
         
         if not success:
             return chat_pb2.SendMessageResponse(
@@ -253,7 +262,8 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
         }
         
         # Submit the command to Raft and wait for the result
-        success, result = self.loop.run_until_complete(self.raft_node.submit_command(command))
+        future = asyncio.run_coroutine_threadsafe(self.raft_node.submit_command(command), self.loop)
+        success, result = future.result()
         
         if not success:
             return chat_pb2.ReadMessagesResponse(
@@ -303,7 +313,8 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
         }
         
         # Submit the command to Raft and wait for the result
-        success, result = self.loop.run_until_complete(self.raft_node.submit_command(command))
+        future = asyncio.run_coroutine_threadsafe(self.raft_node.submit_command(command), self.loop)
+        success, result = future.result()
         
         if not success:
             return chat_pb2.DeleteMessageResponse(
@@ -340,7 +351,8 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
         }
         
         # Submit the command to Raft and wait for the result
-        success, result = self.loop.run_until_complete(self.raft_node.submit_command(command))
+        future = asyncio.run_coroutine_threadsafe(self.raft_node.submit_command(command), self.loop)
+        success, result = future.result()
         
         if not success:
             return chat_pb2.DeleteAccountResponse(

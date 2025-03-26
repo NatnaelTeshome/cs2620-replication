@@ -289,60 +289,6 @@ def demo_create_accounts(client: CustomProtocolClient):
         console.print(f"[bold red]Error during account creation:[/bold red] {e}")
         return False
 
-def demo_send_and_read_messages(client1: CustomProtocolClient, client2: CustomProtocolClient):
-    """Demo sending and reading messages."""
-    console.print("\n[bold cyan]----- SENDING & READING MESSAGES -----[/]")
-    if not client1 or not client2:
-        console.print("[yellow]One or both clients not available, skipping step.[/]")
-        return False
-
-    success = True
-    try:
-        # Ensure logged in (add login calls if client doesn't persist session)
-        try:
-            client1.login("alice", "password")
-            console.print("Logged in as 'alice' on client1")
-        except Exception as e:
-             console.print(f"[yellow]Alice login failed (may already be logged in or account issue): {e}[/]")
-
-        try:
-            client2.login("bob", "password")
-            console.print("Logged in as 'bob' on client2")
-        except Exception as e:
-             console.print(f"[yellow]Bob login failed (may already be logged in or account issue): {e}[/]")
-
-
-        # Alice sends to Bob
-        msg_id1 = client1.send_message("bob", "Hello Bob from the distributed demo!")
-        console.print(f"Alice sent message (ID: {msg_id1})")
-        time.sleep(0.5)
-
-        # Bob sends to Alice
-        msg_id2 = client2.send_message("alice", "Hi Alice! Distributed setup looks cool.")
-        console.print(f"Bob sent message (ID: {msg_id2})")
-        time.sleep(0.5)
-
-        # Read messages
-        console.print("\n[bold]Bob's messages:[/]")
-        messages_bob = client2.read_messages()
-        if not messages_bob: console.print("(No messages received yet)")
-        for msg in messages_bob:
-            ts = datetime.fromtimestamp(msg['timestamp']).strftime('%H:%M:%S')
-            console.print(f"  [{ts}] {msg['from_']}: {msg['content']}")
-
-        console.print("\n[bold]Alice's messages:[/]")
-        messages_alice = client1.read_messages()
-        if not messages_alice: console.print("(No messages received yet)")
-        for msg in messages_alice:
-            ts = datetime.fromtimestamp(msg['timestamp']).strftime('%H:%M:%S')
-            console.print(f"  [{ts}] {msg['from_']}: {msg['content']}")
-
-    except Exception as e:
-        console.print(f"[bold red]Error during message send/read:[/bold red] {e}")
-        success = False # Mark as failed
-
-    return success
-
 def run_demo_workload(step_name: str):
     """Runs a sequence of demo steps and reports success."""
     global demo_step
@@ -350,9 +296,8 @@ def run_demo_workload(step_name: str):
     console.print(f"\n\n[bold magenta]=== WORKLOAD {demo_step}: {step_name} ===")
     # Use existing clients, assuming they are connected
     client1 = clients.get("client1")
-    client2 = clients.get("client2") # Assumes client2 exists
 
-    if not client1 or not client2:
+    if not client1:
          console.print("[bold red]Cannot run workload: Clients not initialized properly.[/]")
          return False
 
@@ -363,7 +308,6 @@ def run_demo_workload(step_name: str):
     results.append(demo_check_account_exists(client1))
     # results.append(demo_create_accounts(client1)) # Create accounts if needed
     time.sleep(2) # Allow replication
-    # results.append(demo_send_and_read_messages(client1, client2))
 
     if all(results):
         console.print(f"[bold green]=== WORKLOAD {demo_step} COMPLETED SUCCESSFULLY ===[/]")
@@ -520,9 +464,8 @@ def run_distributed_demo(args):
         leader_client_host, leader_client_port, _ = get_server_config("1", local_ip, peer_ip)
         console.print(f"Connecting clients to initial leader at {leader_client_host}:{leader_client_port}")
         client1 = create_client("client1", leader_client_host, leader_client_port)
-        client2 = create_client("client2", leader_client_host, leader_client_port) # Both connect to leader initially
 
-        if not client1 or not client2:
+        if not client1:
             console.print("[bold red]Failed to create clients. Aborting demo.[/]")
             active_demo = False # Signal threads to stop
             # No need to start input thread if clients failed
