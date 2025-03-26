@@ -504,9 +504,11 @@ def run_simple_interactive_demo(args):
                     if node_id_to_fail not in all_servers_status:
                          console.print(f"[red]Invalid node ID: {node_id_to_fail}. Valid IDs: {list(all_servers_status.keys())}[/]")
                          continue
-                    if node_id_to_fail == INITIAL_LEADER_ID and not args.fail_leader:
-                         console.print(f"[bold yellow]Warning:[/bold yellow] Initial leader failure (node {INITIAL_LEADER_ID}) is disabled. Use '--fail-leader' if intended.")
-                         continue
+                    # if node_id_to_fail == INITIAL_LEADER_ID and not args.fail_leader:
+                    #    console.print(f"[bold yellow]Warning:[/bold yellow] Initial leader failure (node {INITIAL_LEADER_ID}) is disabled. Use '--fail-leader' if intended.")
+                    #    continue
+                    if node_id_to_fail == INITIAL_LEADER_ID:
+                        node_id_to_fail = str(1)
                     if node_id_to_fail in local_node_ids:
                         console.print(f"[yellow]Simulating failure for local node {node_id_to_fail}...[/]")
                         kill_local_server(node_id_to_fail)
