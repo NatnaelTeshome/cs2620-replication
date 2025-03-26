@@ -113,13 +113,12 @@ def start_server(
         "--node-id", node_id,
         "--host", "0.0.0.0", # Bind to all interfaces
         "--port", str(port),
-        "--raft-port", str(raft_port),
-        "--data-dir", data_dir, # Use node-specific data dir
+        "--raft-port", str(raft_port)
     ]
 
     if leader_raft_info:
         # Pass leader info as JSON string for joining
-        leader_info_json = json.dumps([{"host": h, "port": p} for h, p in leader_raft_info])
+        leader_info_json = json.dumps([[h, p] for h, p in leader_raft_info])
         cmd.extend(["--leader-info", leader_info_json])
 
     logging.info(
@@ -130,8 +129,8 @@ def start_server(
     # Redirect output to /dev/null or a file if it's too noisy for the demo UI
     process = subprocess.Popen(
         cmd,
-        stdout=subprocess.DEVNULL, # Hide server logs from demo console
-        stderr=subprocess.DEVNULL, # Hide server errors from demo console
+        # stdout=subprocess.DEVNULL, # Hide server logs from demo console
+        # stderr=subprocess.DEVNULL, # Hide server errors from demo console
         universal_newlines=True,
     )
 
@@ -606,9 +605,12 @@ def run_distributed_demo(args):
 
         # Wait for threads to finish (input thread sets active_demo=False)
         console.print("Waiting for threads to stop...")
-        input_th.join(timeout=2)
+        if input_th.is_alive():
+            input_th.join(timeout=2)
+
         # Status thread is daemon, will exit automatically, but ensure live display stops
-        live_display.stop()
+        if 'live_display' in locals() and live_display.is_started:
+            live_display.stop()
 
 
 if __name__ == "__main__":

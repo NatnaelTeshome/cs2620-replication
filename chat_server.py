@@ -1,6 +1,7 @@
 import grpc
 from concurrent import futures
 import asyncio
+import os
 import time
 import logging
 import threading
@@ -34,7 +35,12 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
         self.subscribers_lock = threading.RLock()
         
         # Event loop for async operations
-        self.loop = asyncio.new_event_loop()
+        # Get the current event loop or create a new one if needed
+        try:
+            self.loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
         
         logging.info(f"Chat service initialized for node {node_id}")
     
@@ -417,7 +423,15 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
 
 
 class ChatServer:
-    def __init__(self, node_id, config_file=None, host=None, port=None, raft_port=None, make_leader=False):
+    def __init__(
+            self,
+            node_id,
+            config_file=None,
+            host=None,
+            port=None,
+            raft_port=None,
+            make_leader=False
+    ):
         # Load or create cluster configuration
         self.config = ClusterConfig(config_file, node_id)
         
