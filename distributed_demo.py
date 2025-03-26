@@ -55,6 +55,7 @@ status_lock = threading.Lock() # Lock for accessing all_servers_status
 TOTAL_SERVERS = 5
 MACHINE_1_NODES = ["1", "2"]
 MACHINE_2_NODES = ["3", "4", "5"]
+INITIAL_LEADER_ID = str(2)
 BASE_CLIENT_PORT = 50050
 BASE_RAFT_PORT = 50060
 
@@ -144,7 +145,7 @@ def start_server(
         return None
 
     # Check status after a delay (non-blocking)
-    threading.Timer(3.0, check_server_started, args=[node_id, process]).start()
+    threading.Timer(1.5, check_server_started, args=[node_id, process]).start()
     return process
 
 def check_server_started(node_id: str, process: subprocess.Popen):
@@ -459,12 +460,12 @@ def run_simple_interactive_demo(args):
 
     # --- Phase 1: Start Local Servers ---
     console.print("\n[bold blue]--- Starting Local Servers ---[/]")
-    leader_host, _, leader_raft_port = get_server_config("1", local_ip, peer_ip, args.machine_id)
+    leader_host, _, leader_raft_port = get_server_config(INITIAL_LEADER_ID, local_ip, peer_ip, args.machine_id)
     leader_raft_info = [(leader_host, leader_raft_port)]
 
     for node_id in local_node_ids:
         server_info = all_servers_status[node_id]
-        is_initial_leader = (node_id == "1")
+        is_initial_leader = (node_id == INITIAL_LEADER_ID)
         start_server(
             node_id,
             server_info["host"],
@@ -479,8 +480,8 @@ def run_simple_interactive_demo(args):
 
     # --- Phase 2: Create Client ---
     console.print("\n[bold blue]--- Initializing Client ---[/]")
-    console.print(f"Connecting client 'client1' to initial leader (Node 1)...")
-    client1 = create_client("client1", "1")
+    console.print(f"Connecting client 'client1' to cluster...")
+    client1 = create_client("client1", INITIAL_LEADER_ID)
     if not client1:
         console.print("[bold red]Failed to create client. 'test' command may fail.[/]")
 
@@ -488,7 +489,7 @@ def run_simple_interactive_demo(args):
     console.print("\n[bold blue]--- Interactive Mode ---[/]")
     while active_demo:
         try:
-            cmd = console.input("[bold]Enter command ('status', 'test', 'fail <id>', 'exit'):[/] ").strip().lower()
+            cmd = console.input("[bold]Enter command ('status', 'test', 'kill <id>', 'start <id>', 'exit'):[/] ").strip().lower()
 
             if not cmd: # Handle empty input
                 continue
@@ -496,15 +497,15 @@ def run_simple_interactive_demo(args):
             if cmd == "exit":
                 console.print("[yellow]Exit command received. Shutting down...[/]")
                 active_demo = False
-            elif cmd.startswith("fail "):
+            elif cmd.startswith("kill "):
                 parts = cmd.split()
                 if len(parts) == 2 and parts[1].isdigit():
                     node_id_to_fail = parts[1]
                     if node_id_to_fail not in all_servers_status:
                          console.print(f"[red]Invalid node ID: {node_id_to_fail}. Valid IDs: {list(all_servers_status.keys())}[/]")
                          continue
-                    if node_id_to_fail == "1" and not args.fail_leader:
-                         console.print("[bold yellow]Warning:[/bold yellow] Initial leader failure (node 1) is disabled. Use '--fail-leader' if intended.")
+                    if node_id_to_fail == INITIAL_LEADER_ID and not args.fail_leader:
+                         console.print(f"[bold yellow]Warning:[/bold yellow] Initial leader failure (node {INITIAL_LEADER_ID}) is disabled. Use '--fail-leader' if intended.")
                          continue
                     if node_id_to_fail in local_node_ids:
                         console.print(f"[yellow]Simulating failure for local node {node_id_to_fail}...[/]")
@@ -512,13 +513,62 @@ def run_simple_interactive_demo(args):
                     else:
                         console.print(f"[yellow]Node {node_id_to_fail} is remote. Cannot kill directly.[/]")
                 else:
-                    console.print("[red]Invalid 'fail' command. Use 'fail <node_id>' (e.g., 'fail 2').[/]")
+                    console.print("[red]Invalid 'kill' command. Use 'kill <node_id>' (e.g., 'fail 2').[/]")
+            elif cmd.startswith("start "):
+                parts = cmd.split()
+                if len(parts) == 2 and parts[1].isdigit():
+                    node_id_to_start = parts[1]
+                    # 1. Validate Node ID
+                    if node_id_to_start not in all_servers_status:
+                        console.print(f"[red]Invalid node ID: {node_id_to_start}. Valid IDs: {list(all_servers_status.keys())}[/]")
+                        continue
+
+                    # 2. Check if Node is Local
+                    if node_id_to_start not in local_node_ids:
+                        console.print(f"[yellow]Node {node_id_to_start} is remote. Cannot start locally.[/]")
+                        continue
+
+                    # 3. Check if Node is Already Running or Starting
+                    with status_lock:
+                        current_status = all_servers_status[node_id_to_start].get("status", "unknown")
+                    if current_status in ["online", "starting"]:
+                        console.print(f"[yellow]Node {node_id_to_start} is already {current_status}.[/]")
+                        continue
+                    # Safety check: Ensure process isn't lingering in our tracking dict
+                    if node_id_to_start in local_servers_procs:
+                        console.print(f"[yellow]Node {node_id_to_start} process handle still exists unexpectedly. Check status or try failing again.[/]")
+                        continue
+
+                    # 4. Prepare to Start
+                    console.print(f"[yellow]Attempting to start local node {node_id_to_start}...[/]")
+                    server_info = all_servers_status[node_id_to_start]
+
+                    # 5. Determine Leader Info for Rejoining
+                    #    For simplicity, always point restarted nodes to the INITIAL leader's Raft address.
+                    #    The Raft protocol should handle finding the current actual leader.
+                    leader_info_config = all_servers_status[INITIAL_LEADER_ID]
+                    leader_raft_details = [(leader_info_config["host"], leader_info_config["raft_port"])]
+
+                    # 6. Call start_server
+                    #    Note: start_server does NOT clear the data directory, allowing potential state recovery.
+                    start_server(
+                        node_id_to_start,
+                        server_info["host"],
+                        server_info["port"],
+                        server_info["raft_port"],
+                        leader_raft_info=leader_raft_details, # Provide leader info to rejoin
+                    )
+                    # Give it a moment to begin the startup process
+                    time.sleep(1.0)
+
+                else:
+                    console.print("[red]Invalid 'start' command. Use 'start <node_id>' (e.g., 'start 1').[/]")
             elif cmd == "test":
                  run_demo_workload(f"Manual Test @ {datetime.now().strftime('%H:%M:%S')}")
             elif cmd == "status":
                  console.print(generate_status_table()) # Print the table on demand
             else:
-                 console.print(f"[red]Unknown command: '{cmd}'. Available: 'fail <id>', 'test', 'status', 'exit'.[/]")
+                 console.print(f"[red]Unknown command: '{cmd}'. Available: 'kill <id>', 'start <id>', 'test', 'status', 'exit'.[/]")
 
         except EOFError:
              console.print("\n[yellow]EOF detected. Exiting...[/]")
