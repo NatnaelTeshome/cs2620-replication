@@ -438,7 +438,8 @@ class ChatServer:
             host=None,
             port=None,
             raft_port=None,
-            make_leader=False
+            make_leader=False,
+            advertise_host=None
     ):
         # Load or create cluster configuration
         self.config = ClusterConfig(config_file, node_id)
@@ -456,7 +457,7 @@ class ChatServer:
         if not node_info:
             raise ValueError(f"Node {node_id} not found in config")
         
-        self.host = node_info["host"]
+        self.host = get_local_ip() if node_info["host"] == "0.0.0.0" else node_info["host"]
         self.port = node_info["port"]
         self.raft_port = node_info["raft_port"]
         
@@ -513,14 +514,14 @@ class ChatServer:
         logging.info("Server stopped")
 
 
-def start_server(node_id, config_file=None, host=None, port=None, raft_port=None, leader_info=None):
+def start_server(node_id, config_file=None, host=None, port=None, raft_port=None, advertise_host=None, leader_info=None):
     """Start a chat server."""
     server = None 
     result = True
     # If leader information is provided, join the cluster
     if leader_info:
         leader_info = json.loads(leader_info)
-        server = ChatServer(node_id, config_file, host, port, raft_port)
+        server = ChatServer(node_id, config_file, host, port, raft_port, advertise_host=advertise_host)
         result = False
         i = 0
         while not result and i < len(leader_info):
@@ -528,7 +529,7 @@ def start_server(node_id, config_file=None, host=None, port=None, raft_port=None
             i += 1
             result = server.join_cluster(leader_host, leader_port)
     else:
-        server = ChatServer(node_id, config_file, host, port, raft_port, True)
+        server = ChatServer(node_id, config_file, host, port, raft_port, make_leader=True, advertise_host=advertise_host)
     return server, result
 
 
@@ -541,9 +542,16 @@ if __name__ == "__main__":
     parser.add_argument("--host", help="Host address")
     parser.add_argument("--port", type=int, help="Port for chat service")
     parser.add_argument("--raft-port", type=int, help="Port for Raft consensus")
+    parser.add_argument("--advertise-host", help="Host address to advertise to other nodes (defaults to --host if not specified, but should be set in distributed setups)")
     parser.add_argument("--leader-info", help="Leader info (if joining an existing cluster)")
 
     args = parser.parse_args()
+
+   # --- Use the advertise host if provided, otherwise fallback (though fallback is bad for distributed) ---
+    advertise_host = args.advertise_host if args.advertise_host else args.host
+    if advertise_host == "0.0.0.0" and args.leader_info:
+         print("WARNING: Advertising host is 0.0.0.0 while trying to join a cluster. This is likely incorrect for distributed setups. Use --advertise-host.")
+
     
     server = start_server(
         args.node_id,
@@ -551,6 +559,7 @@ if __name__ == "__main__":
         args.host,
         args.port,
         args.raft_port,
+        args.advertise_host,
         args.leader_info
     )
     
