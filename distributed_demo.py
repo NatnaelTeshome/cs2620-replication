@@ -11,15 +11,11 @@ from datetime import datetime
 import json
 import socket # Needed for get_local_ip if not importing
 from typing import Dict, Any, Optional, List, Tuple
-from collections import deque
 
 # --- UI and Input Handling ---
 from rich.console import Console
 from rich.table import Table
-from rich.live import Live
-from rich.panel import Panel
-from rich.layout import Layout
-from rich.text import Text
+# Removed Live, Layout, Panel, Text
 
 # --- Chat Client ---
 from client_grpc import CustomProtocolClient
@@ -41,7 +37,7 @@ except ImportError:
             s.close()
         return IP
 
-# Configure logging (basic for demo, consider file logging for servers)
+# Configure logging (basic for demo, server logs go direct to stdout/err)
 logging.basicConfig(
     level=logging.INFO,
     format="[DEMO %(levelname)s] %(message)s",
@@ -54,10 +50,6 @@ local_servers_procs: Dict[str, subprocess.Popen] = {} # Local processes only
 clients: Dict[str, CustomProtocolClient] = {}
 active_demo = True
 status_lock = threading.Lock() # Lock for accessing all_servers_status
-log_buffer_lock = threading.Lock()
-log_buffer = deque(maxlen=50) # Store recent log lines
-log_reader_threads: List[threading.Thread] = []
-stop_log_readers = threading.Event()
 
 # --- Server Configuration ---
 TOTAL_SERVERS = 5
@@ -93,29 +85,11 @@ def get_server_config(node_id: str, local_ip: str, peer_ip: str, machine_id: int
     elif node_id in MACHINE_2_NODES:
         host = local_ip if machine_id == 2 else peer_ip
     else:
-        # Should not happen if TOTAL_SERVERS and lists are consistent
         raise ValueError(f"Unknown node_id: {node_id}")
 
     client_port = BASE_CLIENT_PORT + int(node_id)
     raft_port = BASE_RAFT_PORT + int(node_id)
     return host, client_port, raft_port
-
-def read_pipe(pipe, node_id: str):
-    """Reads output from a subprocess pipe and adds it to the log buffer."""
-    try:
-        # Use iter to read line by line
-        for line in iter(pipe.readline, ''):
-            if stop_log_readers.is_set():
-                break
-            with log_buffer_lock:
-                log_buffer.append(f"[Node {node_id}] {line.strip()}")
-        pipe.close()
-    except Exception as e:
-        # Handle exceptions if the pipe closes unexpectedly
-        logging.debug(f"Log reader for Node {node_id} pipe encountered error or closed: {e}")
-    finally:
-        logging.debug(f"Log reader thread for Node {node_id} pipe finished.")
-
 
 def start_server(
     node_id: str,
@@ -124,8 +98,8 @@ def start_server(
     raft_port: int,
     leader_raft_info: Optional[List[Tuple[str, int]]] = None,
 ):
-    """Start a chat server node locally and manage its output."""
-    global all_servers_status, local_servers_procs, log_reader_threads
+    """Start a chat server node locally, letting output go to terminal."""
+    global all_servers_status, local_servers_procs
 
     data_dir = f"./data/node_{node_id}"
     try:
@@ -151,28 +125,16 @@ def start_server(
         cmd.extend(["--leader-info", leader_info_json])
 
     logging.info(
-        f"Starting server node {node_id} locally (Raft: {raft_port})"
+        f"Starting server node {node_id} locally (Raft: {raft_port}). Output will appear below."
     )
     with status_lock:
         all_servers_status[node_id]["status"] = "starting"
         all_servers_status[node_id]["details"] = ""
 
     try:
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE, # Capture stdout
-            stderr=subprocess.PIPE, # Capture stderr
-            text=True, # Decode output as text
-            bufsize=1, # Line buffered
-        )
+        # Let subprocess inherit stdout/stderr - logs will print directly
+        process = subprocess.Popen(cmd)
         local_servers_procs[node_id] = process
-
-        # Start threads to read stdout and stderr
-        stdout_thread = threading.Thread(target=read_pipe, args=(process.stdout, node_id), daemon=True)
-        stderr_thread = threading.Thread(target=read_pipe, args=(process.stderr, node_id), daemon=True)
-        stdout_thread.start()
-        stderr_thread.start()
-        log_reader_threads.extend([stdout_thread, stderr_thread])
 
     except Exception as e:
         logging.error(f"Failed to launch server process for node {node_id}: {e}")
@@ -188,16 +150,17 @@ def start_server(
 def check_server_started(node_id: str, process: subprocess.Popen):
     """Callback to check if a server started successfully."""
     global all_servers_status
-    if process.poll() is None: # Process is still running
+    # Check if process is still running
+    if process.poll() is None:
         with status_lock:
             # Only update if still 'starting', might have been killed
-            if all_servers_status[node_id]["status"] == "starting":
+            if all_servers_status.get(node_id, {}).get("status") == "starting":
                 all_servers_status[node_id]["status"] = "online"
         logging.info(f"Server node {node_id} appears to be online.")
     else: # Process terminated
         with status_lock:
             # Only update if still 'starting'
-            if all_servers_status[node_id]["status"] == "starting":
+            if all_servers_status.get(node_id, {}).get("status") == "starting":
                 all_servers_status[node_id]["status"] = "failed_to_start"
                 all_servers_status[node_id]["details"] = f"Exited code {process.returncode}"
         logging.error(f"Server node {node_id} failed to start (exit code: {process.returncode}).")
@@ -211,11 +174,10 @@ def kill_local_server(node_id: str):
         process = local_servers_procs[node_id]
         status_before_kill = "unknown"
         with status_lock:
-             status_before_kill = all_servers_status[node_id].get("status", "unknown")
+             status_before_kill = all_servers_status.get(node_id, {}).get("status", "unknown")
 
-        if status_before_kill not in ["offline", "killed"]:
+        if status_before_kill not in ["offline", "killed", "failed_to_start", "error_killing"]:
             try:
-                # Send SIGTERM first
                 process.terminate()
                 try:
                     process.wait(timeout=2)
@@ -233,17 +195,15 @@ def kill_local_server(node_id: str):
                 with status_lock:
                     all_servers_status[node_id]["status"] = "offline"
                     all_servers_status[node_id]["details"] = f"Exit code {exit_code}"
-                # Remove from active processes
                 del local_servers_procs[node_id]
 
             except Exception as e:
                 logging.error(f"Error killing server {node_id}: {e}")
                 with status_lock:
-                    # Update status even if error occurred during kill
                     all_servers_status[node_id]["status"] = "error_killing"
                     all_servers_status[node_id]["details"] = str(e)
                 if node_id in local_servers_procs:
-                     del local_servers_procs[node_id] # Attempt removal
+                     del local_servers_procs[node_id]
         else:
              logging.info(f"Server node {node_id} was already {status_before_kill}.")
              if node_id in local_servers_procs:
@@ -255,15 +215,10 @@ def kill_local_server(node_id: str):
         )
 
 def cleanup():
-    """Clean up locally running servers, clients, and threads."""
+    """Clean up locally running servers and clients."""
     global active_demo
-    active_demo = False # Signal threads to stop
+    active_demo = False # Signal threads/loops to stop
     logging.info("Cleaning up local resources...")
-
-    # Signal and wait for log reader threads
-    stop_log_readers.set()
-    time.sleep(0.1) # Give threads a moment to see the event
-    # No join needed as they are daemons, but ensure pipes are closed by stopping servers
 
     # Stop servers started by this script instance
     local_node_ids = list(local_servers_procs.keys()) # Get IDs before iterating
@@ -278,31 +233,24 @@ def cleanup():
         except Exception as e:
             logging.error(f"Error closing client {client_id}: {e}")
 
-    # Remove cluster config files if they were created locally (optional)
-    # for i in range(1, TOTAL_SERVERS + 1):
-    #     if os.path.exists(f"cluster_config_{i}.json"):
-    #         try:
-    #             os.remove(f"cluster_config_{i}.json")
-    #         except OSError as e:
-    #             logging.warning(f"Could not remove config file cluster_config_{i}.json: {e}")
-
     logging.info("Local cleanup finished.")
 
-# --- Client and Demo Steps ---
+# --- Client Callbacks ---
 
 def on_new_message(message):
     """Callback for new message events."""
-    with log_buffer_lock:
-        log_buffer.append(
-            f"[bold green][PUSH][/] New msg from {message['from_']}: {message['content']}"
-        )
+    # Print directly, will interleave with server logs and input prompt
+    console.print(
+        f"\n[bold green][PUSH][/] New msg from {message['from_']}: {message['content']}"
+    )
 
 def on_delete_message(message):
     """Callback for delete message events."""
-    with log_buffer_lock:
-        log_buffer.append(
-            f"[bold red][PUSH][/] Msgs deleted: {message['message_ids']}"
-        )
+    console.print(
+        f"\n[bold red][PUSH][/] Msgs deleted: {message['message_ids']}"
+    )
+
+# --- Client Creation ---
 
 def create_client(client_id: str, target_node_id: str):
     """Create a chat client connected to a specific server node ID."""
@@ -337,8 +285,6 @@ def create_client(client_id: str, target_node_id: str):
 def run_demo_workload(step_name: str):
     """Runs a sequence of demo steps and reports success."""
     console.print(f"\n[bold magenta]=== Running Workload: {step_name} ===")
-    # Use existing clients, assuming they are connected
-    # TODO: Smarter client handling - try connecting to known nodes if primary fails?
     client1 = clients.get("client1")
 
     if not client1:
@@ -349,7 +295,7 @@ def run_demo_workload(step_name: str):
     def step_check_accounts(c):
         console.print("[cyan]-- Checking accounts 'alice', 'bob'...[/]")
         try:
-            _ = c.account_exists("alice") # Ignore result, just check reachability
+            _ = c.account_exists("alice")
             _ = c.account_exists("bob")
             console.print("[green]Account check successful (server reachable).[/]")
             return True
@@ -365,7 +311,7 @@ def run_demo_workload(step_name: str):
                  console.print(f"Alice account: {msg_a}")
             else:
                  console.print(f"[red]Failed creating alice: {msg_a}[/]")
-                 return False # Hard fail if creation fails unexpectedly
+                 return False
 
             res_b, msg_b = c.create_account("bob", "password")
             if res_b or "exists" in msg_b:
@@ -383,11 +329,9 @@ def run_demo_workload(step_name: str):
     def step_send_message(c):
         console.print("[cyan]-- Alice sending message to Bob...[/]")
         try:
-            # Login alice first (needed for send)
             login_ok, login_msg, _ = c.login("alice", "password")
             if not login_ok:
                 console.print(f"[red]Login failed for alice: {login_msg}[/]")
-                # Attempt to create if login failed due to non-existence
                 if "No such user" in login_msg:
                     c.create_account("alice", "password")
                     login_ok, login_msg, _ = c.login("alice", "password")
@@ -397,11 +341,9 @@ def run_demo_workload(step_name: str):
                 else:
                     return False
 
-            # Ensure bob exists for sending
             if not c.account_exists("bob"):
                  c.create_account("bob", "password")
 
-            # Send message
             content = f"Hello from Alice @ {datetime.now().isoformat()}"
             sent, msg, _ = c.send_message("bob", content)
             if sent:
@@ -417,7 +359,7 @@ def run_demo_workload(step_name: str):
     # --- Execute workload steps ---
     results = []
     results.append(step_check_accounts(client1))
-    time.sleep(0.5) # Small delay between steps
+    time.sleep(0.5)
     results.append(step_create_accounts(client1))
     time.sleep(0.5)
     results.append(step_send_message(client1))
@@ -430,16 +372,15 @@ def run_demo_workload(step_name: str):
         console.print(f"[bold red]=== WORKLOAD '{step_name}' FAILED ===[/]")
         return False
 
-# --- UI Generation ---
+# --- Status Table Generation ---
 
 def generate_status_table() -> Table:
     """Generates the Rich table for server status."""
     global all_servers_status
-    table = Table(title="Cluster Status", expand=True)
+    table = Table(title="", expand=True)
     table.add_column("Node ID", style="cyan", no_wrap=True)
     table.add_column("Location", justify="center")
     table.add_column("Status", justify="center")
-    table.add_column("Details", style="dim")
     table.add_column("Address (Client / Raft)", style="magenta")
 
     with status_lock:
@@ -448,7 +389,6 @@ def generate_status_table() -> Table:
             server_info = all_servers_status[node_id]
             status = server_info.get("status", "unknown")
             location = server_info.get("location", "Unknown")
-            details = server_info.get("details", "")
 
             if status == "online":
                 status_text = "[bold green]● Online[/]"
@@ -460,7 +400,7 @@ def generate_status_table() -> Table:
                  status_text = "[bold red]✗ Failed[/]"
             elif status == "error_killing":
                  status_text = "[bold red]⚠ Error Kill[/]"
-            elif status == "killed": # Explicitly set by kill_local_server
+            elif status == "killed":
                  status_text = "[bold red]○ Killed[/]"
             else: # unknown or other
                 status_text = f"[grey]{status}[/]"
@@ -473,98 +413,16 @@ def generate_status_table() -> Table:
                  loc_text = "[dim]?[/]"
 
             address = f"{server_info.get('host', '?')}:{server_info.get('port', '?')} / {server_info.get('raft_port', '?')}"
-            table.add_row(node_id, loc_text, status_text, details, address)
+            table.add_row(node_id, loc_text, status_text, address)
     return table
-
-def generate_log_panel() -> Panel:
-    """Generates the Rich panel for logs."""
-    with log_buffer_lock:
-        log_content = Text("\n".join(log_buffer), no_wrap=False)
-    return Panel(log_content, title="Logs", border_style="blue", expand=True)
-
-def generate_layout() -> Layout:
-    """Create the layout for the demo UI."""
-    layout = Layout(name="root")
-    layout.split(
-        Layout(name="main", ratio=1),
-    )
-    layout["main"].split_row(
-        Layout(name="status", ratio=1),
-        Layout(name="logs", ratio=2),
-    )
-    return layout
-
-# --- UI Update Thread ---
-
-def status_update_thread(live: Live):
-    """Thread function to update the status display."""
-    while active_demo:
-        try:
-            layout = generate_layout()
-            layout["status"].update(generate_status_table())
-            layout["logs"].update(generate_log_panel())
-            live.update(layout, refresh=True)
-        except Exception as e:
-            logging.error(f"Error updating UI: {e}") # Log error but continue
-        time.sleep(1.5) # Update interval
-
-# --- User Input Handling ---
-
-def handle_user_input(live: Live, fail_leader_allowed: bool, local_node_ids: List[str]):
-    """Handles user commands in the main loop."""
-    global active_demo
-    try:
-        # Temporarily stop live display to print prompt cleanly
-        live.stop()
-        cmd = console.input("[bold]Enter command ('fail <id>', 'test', 'exit'):[/] ").strip().lower()
-        live.start(refresh=True) # Resume live display
-
-        if cmd == "exit":
-            console.print("[yellow]Exit command received. Shutting down...[/]")
-            active_demo = False
-        elif cmd.startswith("fail "):
-            parts = cmd.split()
-            if len(parts) == 2 and parts[1].isdigit():
-                node_id_to_fail = parts[1]
-
-                if node_id_to_fail not in all_servers_status:
-                     console.print(f"[red]Invalid node ID: {node_id_to_fail}. Valid IDs: {list(all_servers_status.keys())}[/]")
-                     return
-
-                if node_id_to_fail == "1" and not fail_leader_allowed:
-                     console.print("[bold yellow]Warning:[/bold yellow] Initial leader failure (node 1) is disabled. Use '--fail-leader' if intended.")
-                     return
-
-                if node_id_to_fail in local_node_ids:
-                    console.print(f"[yellow]Simulating failure for local node {node_id_to_fail}...[/]")
-                    kill_local_server(node_id_to_fail)
-                else:
-                    console.print(f"[yellow]Node {node_id_to_fail} is remote. Cannot kill directly. Status will remain unchanged.[/]")
-            else:
-                console.print("[red]Invalid 'fail' command. Use 'fail <node_id>' (e.g., 'fail 2').[/]")
-        elif cmd == "test":
-             run_demo_workload(f"Manual Test @ {datetime.now().strftime('%H:%M:%S')}")
-        elif cmd: # Non-empty command that wasn't recognized
-             console.print(f"[red]Unknown command: '{cmd}'. Available: 'fail <id>', 'test', 'exit'.[/]")
-
-    except EOFError: # Handle Ctrl+D
-         console.print("\n[yellow]EOF detected. Exiting...[/]")
-         active_demo = False
-    except KeyboardInterrupt: # Handle Ctrl+C in input prompt
-         console.print("\n[yellow]Ctrl+C detected. Exiting...[/]")
-         active_demo = False
-    except Exception as e:
-         logging.error(f"Error processing input: {e}")
-         console.print(f"[red]An error occurred processing input: {e}[/]")
-
 
 # --- Main Demo Logic ---
 
-def run_interactive_demo(args):
-    """Run the interactive distributed demo."""
+def run_simple_interactive_demo(args):
+    """Run the simplified interactive distributed demo."""
     global active_demo, clients, all_servers_status
 
-    console.print(f"[bold blue]=== INTERACTIVE DISTRIBUTED CHAT DEMO (Machine {args.machine_id}) ===[/]")
+    console.print(f"[bold blue]=== SIMPLE INTERACTIVE DISTRIBUTED CHAT DEMO (Machine {args.machine_id}) ===[/]")
 
     local_ip = get_local_ip()
     console.print(f"Local IP detected: [cyan]{local_ip}[/]")
@@ -572,19 +430,16 @@ def run_interactive_demo(args):
     # Get Peer IP
     peer_ip = args.peer_ip
     if not peer_ip:
-        # Simple auto-detection for common local testing scenarios
         if local_ip.startswith("192.168.") or local_ip.startswith("10."):
-             peer_ip = local_ip # Assume peer is self if local IP looks private
+             peer_ip = local_ip
              console.print(f"[yellow]Peer IP not provided, assuming local testing (peer={local_ip})[/]")
         else:
-            # Fallback to prompt if auto-detection is uncertain
             if args.machine_id == 1:
                 peer_ip = console.input("[yellow]Enter the IP address of Machine 2[/]: ")
             else:
                 peer_ip = console.input("[yellow]Enter the IP address of Machine 1 (Leader)[/]: ")
     console.print(f"Peer IP configured: [cyan]{peer_ip}[/]")
 
-    # Determine which nodes run locally vs remotely
     local_node_ids = MACHINE_1_NODES if args.machine_id == 1 else MACHINE_2_NODES
     console.print(f"This machine will run nodes: [cyan]{', '.join(local_node_ids)}[/]")
 
@@ -602,19 +457,18 @@ def run_interactive_demo(args):
                 "port": client_port,
                 "raft_port": raft_port,
                 "location": "local" if node_id in local_node_ids else "remote",
-                "status": "pending", # Initial state before starting
+                "status": "pending",
                 "details": ""
             }
 
     # --- Phase 1: Start Local Servers ---
     console.print("\n[bold blue]--- Starting Local Servers ---[/]")
     leader_host, _, leader_raft_port = get_server_config("1", local_ip, peer_ip, args.machine_id)
-    leader_raft_info = [(leader_host, leader_raft_port)] # Raft address of node 1
+    leader_raft_info = [(leader_host, leader_raft_port)]
 
     for node_id in local_node_ids:
         server_info = all_servers_status[node_id]
         is_initial_leader = (node_id == "1")
-
         start_server(
             node_id,
             server_info["host"],
@@ -622,41 +476,63 @@ def run_interactive_demo(args):
             server_info["raft_port"],
             leader_raft_info=None if is_initial_leader else leader_raft_info,
         )
-        # Add a small delay between starting followers
-        if not is_initial_leader:
-            time.sleep(0.5)
+        if not is_initial_leader: time.sleep(0.5)
 
     console.print("[green]Waiting for servers to initialize...[/]")
-    time.sleep(5) # Allow time for servers to start and potentially elect leader
+    time.sleep(5)
 
-    # --- Phase 2: Start UI and Clients ---
-    console.print("\n[bold blue]--- Initializing UI and Client ---[/]")
-    live_display = Live(generate_layout(), console=console, refresh_per_second=1, auto_refresh=False, vertical_overflow="visible")
+    # --- Phase 2: Create Client ---
+    console.print("\n[bold blue]--- Initializing Client ---[/]")
+    console.print(f"Connecting client 'client1' to initial leader (Node 1)...")
+    client1 = create_client("client1", "1")
+    if not client1:
+        console.print("[bold red]Failed to create client. 'test' command may fail.[/]")
 
-    # Start status update thread
-    status_thread = threading.Thread(target=status_update_thread, args=(live_display,), daemon=True)
+    # --- Phase 3: Interactive Command Loop ---
+    console.print("\n[bold blue]--- Interactive Mode ---[/]")
+    while active_demo:
+        try:
+            cmd = console.input("[bold]Enter command ('status', 'test', 'fail <id>', 'exit'):[/] ").strip().lower()
 
-    with live_display: # Manage the live display context
-        status_thread.start()
+            if not cmd: # Handle empty input
+                continue
 
-        # Create client - connect to the initial leader (Node 1)
-        console.print(f"Connecting client 'client1' to initial leader (Node 1)...")
-        client1 = create_client("client1", "1")
+            if cmd == "exit":
+                console.print("[yellow]Exit command received. Shutting down...[/]")
+                active_demo = False
+            elif cmd.startswith("fail "):
+                parts = cmd.split()
+                if len(parts) == 2 and parts[1].isdigit():
+                    node_id_to_fail = parts[1]
+                    if node_id_to_fail not in all_servers_status:
+                         console.print(f"[red]Invalid node ID: {node_id_to_fail}. Valid IDs: {list(all_servers_status.keys())}[/]")
+                         continue
+                    if node_id_to_fail == "1" and not args.fail_leader:
+                         console.print("[bold yellow]Warning:[/bold yellow] Initial leader failure (node 1) is disabled. Use '--fail-leader' if intended.")
+                         continue
+                    if node_id_to_fail in local_node_ids:
+                        console.print(f"[yellow]Simulating failure for local node {node_id_to_fail}...[/]")
+                        kill_local_server(node_id_to_fail)
+                    else:
+                        console.print(f"[yellow]Node {node_id_to_fail} is remote. Cannot kill directly.[/]")
+                else:
+                    console.print("[red]Invalid 'fail' command. Use 'fail <node_id>' (e.g., 'fail 2').[/]")
+            elif cmd == "test":
+                 run_demo_workload(f"Manual Test @ {datetime.now().strftime('%H:%M:%S')}")
+            elif cmd == "status":
+                 console.print(generate_status_table()) # Print the table on demand
+            else:
+                 console.print(f"[red]Unknown command: '{cmd}'. Available: 'fail <id>', 'test', 'status', 'exit'.[/]")
 
-        if not client1:
-            console.print("[bold red]Failed to create client. Demo limited.[/]")
-            # Continue without client for observation? Or exit? Let's continue.
-        else:
-            console.print("[green]Client 'client1' connected.[/]")
-
-        # --- Phase 3: Interactive Loop ---
-        console.print("\n[bold blue]--- Interactive Mode ---[/]")
-        console.print("Enter commands: 'fail <id>', 'test', 'exit'")
-
-        while active_demo:
-            handle_user_input(live_display, args.fail_leader, local_node_ids)
-            # Small sleep allows UI thread to update between inputs if needed
-            time.sleep(0.1)
+        except EOFError:
+             console.print("\n[yellow]EOF detected. Exiting...[/]")
+             active_demo = False
+        except KeyboardInterrupt:
+             console.print("\n[yellow]Ctrl+C detected. Exiting...[/]")
+             active_demo = False
+        except Exception as e:
+             logging.error(f"Error processing input: {e}")
+             console.print(f"[red]An error occurred processing input: {e}[/]")
 
     # --- Demo End ---
     console.print("Exiting interactive loop...")
@@ -664,41 +540,34 @@ def run_interactive_demo(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Interactive Distributed Chat System Demo")
+    parser = argparse.ArgumentParser(description="Simple Interactive Distributed Chat Demo")
     parser.add_argument(
-        "--machine-id",
-        type=int,
-        choices=[1, 2],
-        required=True,
+        "--machine-id", type=int, choices=[1, 2], required=True,
         help="ID of the machine this script is running on (1 or 2).",
     )
     parser.add_argument(
-        "--peer-ip",
-        type=str,
-        default=None,
+        "--peer-ip", type=str, default=None,
         help="IP address of the other machine. If not provided, will attempt auto-detect or prompt.",
     )
     parser.add_argument(
-        "--skip-clear",
-        action="store_true",
-        help="Skip clearing local data directories.",
+        "--skip-clear", action="store_true", help="Skip clearing local data directories.",
     )
     parser.add_argument(
-        "--fail-leader",
-        action="store_true",
+        "--fail-leader", action="store_true",
         help="Allow failing the initial leader (node 1) via the 'fail' command.",
     )
     args = parser.parse_args()
 
     try:
-        run_interactive_demo(args)
+        run_simple_interactive_demo(args)
     except KeyboardInterrupt:
+        # This handles Ctrl+C if it happens outside the input prompt
         console.print("\n[yellow]Demo interrupted by user (Ctrl+C in main thread).[/]")
-        active_demo = False # Signal threads
+        active_demo = False
     except Exception as e:
         console.print(f"\n[bold red]Demo failed with unexpected error:[/bold red] {e}")
-        logging.exception("Unhandled exception in main demo.") # Log traceback
-        active_demo = False # Signal threads
+        logging.exception("Unhandled exception in main demo.")
+        active_demo = False
     finally:
         cleanup()
         console.print("[bold blue]Cleanup complete. Exiting.[/]")
