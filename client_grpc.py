@@ -58,6 +58,7 @@ class CustomProtocolClient:
         # Look for patterns like "Current leader is node_id" or "Current leader is host:port"
         match = re.search(r"Current leader is (\S+)", error_message)
         if match:
+            print('=' * 25, "Found a match:", match, match.group(0))
             leader_id = match.group(1).rstrip('.')
             # Check if leader_id contains connection information
             if ':' in leader_id:
