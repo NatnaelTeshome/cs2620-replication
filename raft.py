@@ -1,6 +1,8 @@
 import threading
 import logging
 import time
+import inspect
+import collections
 import random
 import grpc
 import asyncio
@@ -32,6 +34,117 @@ FOLLOWER = "FOLLOWER"
 CANDIDATE = "CANDIDATE"
 LEADER = "LEADER"
 
+lock_logger = logging.getLogger("LockDebug")
+lock_logger.setLevel(logging.DEBUG)
+
+
+
+class DebuggingRLock:
+    """
+    A wrapper around threading.RLock that logs acquisition, release,
+    context, and hold duration.
+    """
+
+    def __init__(self):
+        self._lock = threading.RLock()
+        # Stores acquisition info: {thread_id: [(start_time, frame_info), ...]}
+        # Using a deque to easily manage nested acquires/releases
+        self._lock_holders = collections.defaultdict(collections.deque)
+
+    def acquire(self, blocking=True, timeout=-1):
+        # Get context of the caller (2 frames up: acquire -> __enter__ -> caller)
+        # Or (1 frame up: acquire -> caller) if called directly
+        try:
+            stack = inspect.stack()
+            # Find the first frame outside this class
+            caller_frame_info = None
+            for frame_record in stack[1:]: # Start search from caller
+                if frame_record.filename != __file__: # Adjust if DebuggingRLock is in a different file
+                    caller_frame_info = frame_record
+                    break
+            if caller_frame_info is None: # Fallback if something went wrong
+                 caller_frame_info = stack[1]
+
+            context = f"{caller_frame_info.filename}:{caller_frame_info.lineno} ({caller_frame_info.function})"
+        except Exception:
+            context = "Context unavailable"
+
+        thread_id = threading.get_ident()
+        lock_logger.debug(f"Thread {thread_id} attempting to acquire lock from {context}...")
+
+        start_time = time.monotonic()
+        acquired = self._lock.acquire(blocking, timeout)
+        end_time = time.monotonic()
+
+        if acquired:
+            self._lock_holders[thread_id].append((start_time, context))
+            lock_logger.info(
+                f"Thread {thread_id} ACQUIRED lock from {context} (waited {(end_time - start_time)*1000:.3f}ms)"
+            )
+        else:
+             lock_logger.warning(
+                f"Thread {thread_id} FAILED to acquire lock from {context} after {(end_time - start_time)*1000:.3f}ms"
+            )
+        return acquired
+
+    def release(self):
+        # Get context of the caller (2 frames up: release -> __exit__ -> caller)
+        # Or (1 frame up: release -> caller) if called directly
+        try:
+            stack = inspect.stack()
+             # Find the first frame outside this class
+            caller_frame_info = None
+            for frame_record in stack[1:]: # Start search from caller
+                if frame_record.filename != __file__: # Adjust if DebuggingRLock is in a different file
+                    caller_frame_info = frame_record
+                    break
+            if caller_frame_info is None: # Fallback if something went wrong
+                 caller_frame_info = stack[1]
+            release_context = f"{caller_frame_info.filename}:{caller_frame_info.lineno} ({caller_frame_info.function})"
+        except Exception:
+            release_context = "Context unavailable"
+
+        thread_id = threading.get_ident()
+
+        if thread_id not in self._lock_holders or not self._lock_holders[thread_id]:
+            lock_logger.error(f"Thread {thread_id} attempted to release lock from {release_context} but no acquisition record found!")
+            # Still attempt to release the underlying lock
+            try:
+                self._lock.release()
+            except RuntimeError as e:
+                 lock_logger.error(f"Thread {thread_id} underlying lock release failed: {e}")
+            return
+
+        start_time, acquire_context = self._lock_holders[thread_id].pop()
+        release_time = time.monotonic()
+        duration_ms = (release_time - start_time) * 1000
+
+        lock_logger.info(
+            f"Thread {thread_id} RELEASED lock from {release_context} "
+            f"(held for {duration_ms:.3f}ms, acquired in {acquire_context})"
+        )
+
+        # Clean up dict entry if deque is empty
+        if not self._lock_holders[thread_id]:
+            del self._lock_holders[thread_id]
+
+        try:
+            self._lock.release()
+        except RuntimeError as e:
+            # This might happen if release is called more times than acquire
+            lock_logger.error(f"Thread {thread_id} underlying lock release failed from {release_context}: {e}")
+
+
+    def __enter__(self):
+        self.acquire()
+        return self # Return self to allow 'as' syntax if needed, though not typical for locks
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()
+        # Return False to propagate exceptions
+        return False
+
+
 class RaftNode(raft_pb2_grpc.RaftServiceServicer):
     def __init__(self, node_id, config, state_machine, make_leader):
         self.node_id = node_id
@@ -58,7 +171,7 @@ class RaftNode(raft_pb2_grpc.RaftServiceServicer):
         self.command_queue = asyncio.Queue()
         
         # Locks
-        self.state_lock = threading.RLock()
+        self.state_lock = DebuggingRLock()  # threading.RLock()
         self.election_timer = None
         
         # gRPC server for Raft communication
